@@ -480,15 +480,15 @@ async def delete_cms_project(project_id: str):
 if FRONTEND_DIR.exists():
     app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIR / "assets")), name="assets")
 
-    @app.get("/style.css")
+    @app.api_route("/style.css", methods=["GET", "HEAD"])
     async def get_css():
         return FileResponse(FRONTEND_DIR / "style.css", media_type="text/css")
 
-    @app.get("/app.js")
+    @app.api_route("/app.js", methods=["GET", "HEAD"])
     async def get_js():
         return FileResponse(FRONTEND_DIR / "app.js", media_type="application/javascript")
 
-    @app.get("/{full_path:path}")
+    @app.api_route("/{full_path:path}", methods=["GET", "HEAD"])
     async def serve_spa(full_path: str):
         # If API route not found, let FastAPI handle 404
         if full_path.startswith("api/"):
