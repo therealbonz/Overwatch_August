@@ -1,15 +1,23 @@
 /**
- * therealbonz.com - Interactive Launchpad, 3D Studio & CMS Controller
+ * therealbonz.com - Interactive Launchpad, 3D Studio, Secure Auth & CMS Controller
  */
 
 // Global State
 const state = {
+  user: null, // { username, display_name, role, can_add_admins }
+  clientIp: '',
+  isIpTrusted: false,
+  isSuperadmin: false,
+  token: localStorage.getItem('bonz_admin_token') || '',
+
   repos: [],
   selectedLanguage: 'all',
   searchQuery: '',
   projects: [],
   serverCurrentPath: '',
   serverBaseDir: '',
+
+  // 3D Cube physics
   isAutoRotating: true,
   rotationX: -15,
   rotationY: 25,
@@ -37,16 +45,31 @@ const LANG_COLORS = {
 };
 
 // ==========================================================================
+// Authenticated Fetch Helper
+// ==========================================================================
+
+async function authFetch(url, options = {}) {
+  options.headers = options.headers || {};
+  if (state.token) {
+    options.headers['Authorization'] = `Bearer ${state.token}`;
+    options.headers['X-Admin-Token'] = state.token;
+  }
+  return fetch(url, options);
+}
+
+// ==========================================================================
 // Initialization
 // ==========================================================================
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  await initAuth();
   initSystemStatus();
   init3DCube();
   initProjectsCMS();
   initGitHubRepos();
   initServerFileManager();
   initModals();
+  initAdminPanelTabs();
 });
 
 // ==========================================================================
@@ -85,6 +108,402 @@ function escapeHtml(str) {
 }
 
 // ==========================================================================
+// Authentication & Access Control
+// ==========================================================================
+
+async function initAuth() {
+  try {
+    const res = await authFetch('/api/auth/me');
+    if (res.ok) {
+      const data = await res.json();
+      state.clientIp = data.client_ip;
+      state.isIpTrusted = data.is_ip_trusted;
+      state.user = data.authenticated ? data.user : null;
+      state.isSuperadmin = Boolean(data.is_superadmin);
+    }
+  } catch (err) {
+    state.user = null;
+  }
+
+  updateAuthUI();
+
+  // Form login submission
+  const loginForm = document.getElementById('form-admin-login');
+  if (loginForm) {
+    loginForm.addEventListener('submit', handleLogin);
+  }
+
+  // Unlock server view button
+  const unlockBtn = document.getElementById('btn-unlock-server-view');
+  if (unlockBtn) {
+    unlockBtn.addEventListener('click', () => openLoginModal());
+  }
+}
+
+function updateAuthUI() {
+  const isLogged = Boolean(state.user);
+  document.body.classList.toggle('is-admin', isLogged);
+
+  const authContainer = document.getElementById('auth-state-container');
+  const adminStat = document.getElementById('stat-admin-mode');
+  const ipPill = document.getElementById('client-ip-pill');
+
+  if (ipPill && state.clientIp) {
+    ipPill.textContent = `IP: ${state.clientIp}`;
+    ipPill.title = state.isIpTrusted ? 'IP Whitelisted' : 'IP Not Whitelisted';
+  }
+
+  if (adminStat) {
+    adminStat.textContent = isLogged ? (state.isSuperadmin ? 'Superadmin' : 'Admin') : 'Guest';
+    adminStat.style.color = isLogged ? 'var(--neon-emerald)' : 'var(--neon-cyan)';
+  }
+
+  // Update header buttons
+  if (authContainer) {
+    if (isLogged) {
+      authContainer.innerHTML = `
+        <div class="admin-badge-group">
+          <span class="admin-pill" title="Logged in as ${escapeHtml(state.user.username)}">
+            👑 ${escapeHtml(state.user.username)}
+          </span>
+          ${state.isSuperadmin ? `
+            <button class="btn btn-sm btn-secondary" id="btn-open-admin-panel" title="Manage Admins & Security">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              <span>Admin Panel</span>
+            </button>
+          ` : ''}
+          <button class="btn btn-sm btn-outline" id="btn-logout" title="Sign Out">
+            <span>Log Out</span>
+          </button>
+        </div>
+      `;
+
+      const panelBtn = document.getElementById('btn-open-admin-panel');
+      if (panelBtn) panelBtn.addEventListener('click', openAdminPanelModal);
+
+      const logoutBtn = document.getElementById('btn-logout');
+      if (logoutBtn) logoutBtn.addEventListener('click', handleLogout);
+    } else {
+      authContainer.innerHTML = `
+        <button class="btn btn-sm btn-glass" id="btn-open-login" title="Admin Login">
+          <svg class="icon" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          <span>Admin Login</span>
+        </button>
+      `;
+      const loginBtn = document.getElementById('btn-open-login');
+      if (loginBtn) loginBtn.addEventListener('click', openLoginModal);
+    }
+  }
+
+  // Server section locked state toggle
+  const lockedView = document.getElementById('server-guest-locked');
+  const adminBrowser = document.getElementById('server-admin-browser');
+  if (lockedView && adminBrowser) {
+    if (isLogged) {
+      lockedView.style.display = 'none';
+      adminBrowser.style.display = 'block';
+    } else {
+      lockedView.style.display = 'block';
+      adminBrowser.style.display = 'none';
+    }
+  }
+
+  // Re-render project cards to show/hide edit buttons
+  renderProjects();
+}
+
+function openLoginModal() {
+  const modal = document.getElementById('modal-login');
+  const ipText = document.getElementById('login-ip-text');
+  const ipDot = document.getElementById('login-ip-dot');
+
+  if (ipText && ipDot) {
+    if (state.isIpTrusted) {
+      ipText.innerHTML = `Connected from whitelisted IP: <strong>${escapeHtml(state.clientIp)}</strong>`;
+      ipDot.className = 'ip-dot';
+    } else {
+      ipText.innerHTML = `Warning: Your IP (<strong>${escapeHtml(state.clientIp)}</strong>) is not on the admin whitelist.`;
+      ipDot.className = 'ip-dot danger';
+    }
+  }
+
+  if (modal) modal.classList.add('active');
+}
+
+async function handleLogin(e) {
+  e.preventDefault();
+  const submitBtn = document.getElementById('btn-submit-login');
+  const btnText = submitBtn.querySelector('.btn-text');
+  const spinner = submitBtn.querySelector('.btn-spinner');
+
+  const username = document.getElementById('login-username').value.trim();
+  const password = document.getElementById('login-password').value;
+
+  btnText.textContent = 'Verifying...';
+  spinner.style.display = 'inline-block';
+  submitBtn.disabled = true;
+
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Login failed');
+
+    state.token = data.token;
+    localStorage.setItem('bonz_admin_token', data.token);
+    state.user = data.user;
+    state.isSuperadmin = data.user.username.toLowerCase() === 'bonz' || data.user.role === 'superadmin';
+
+    showToast(`Welcome back, ${data.user.display_name}!`, 'success');
+    document.getElementById('modal-login').classList.remove('active');
+    updateAuthUI();
+
+    // Reload server folder explorer now that we are authenticated
+    await loadServerFolders('');
+  } catch (err) {
+    showToast(`Auth Error: ${err.message}`, 'error');
+  } finally {
+    btnText.textContent = 'Sign In as Admin';
+    spinner.style.display = 'none';
+    submitBtn.disabled = false;
+  }
+}
+
+async function handleLogout() {
+  try {
+    await authFetch('/api/auth/logout', { method: 'POST' });
+  } catch (_) {}
+
+  state.token = '';
+  localStorage.removeItem('bonz_admin_token');
+  state.user = null;
+  state.isSuperadmin = false;
+
+  showToast('Logged out.', 'info');
+  updateAuthUI();
+}
+
+// ==========================================================================
+// Admin Panel Management (bonz Superadmin)
+// ==========================================================================
+
+function initAdminPanelTabs() {
+  document.querySelectorAll('.admin-panel-tabs .tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tabId = btn.dataset.tab;
+      document.querySelectorAll('.admin-panel-tabs .tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.admin-panel-body .tab-content').forEach(c => c.classList.remove('active'));
+
+      btn.classList.add('active');
+      const target = document.getElementById(tabId);
+      if (target) target.classList.add('active');
+    });
+  });
+
+  // Forms in admin panel
+  const addAdminForm = document.getElementById('form-add-admin');
+  if (addAdminForm) addAdminForm.addEventListener('submit', handleAddAdmin);
+
+  const addIpForm = document.getElementById('form-add-ip');
+  if (addIpForm) addIpForm.addEventListener('submit', handleAddIp);
+
+  const whitelistCurrentBtn = document.getElementById('btn-whitelist-current-ip');
+  if (whitelistCurrentBtn) whitelistCurrentBtn.addEventListener('click', handleWhitelistCurrentIp);
+
+  const changePassForm = document.getElementById('form-change-password');
+  if (changePassForm) changePassForm.addEventListener('submit', handleChangePassword);
+}
+
+async function openAdminPanelModal() {
+  const modal = document.getElementById('modal-admin-panel');
+  const currentIpLabel = document.getElementById('admin-panel-current-ip');
+  if (currentIpLabel) currentIpLabel.textContent = state.clientIp;
+
+  if (modal) {
+    modal.classList.add('active');
+    await loadAdminUsersList();
+    await loadSecuritySettings();
+  }
+}
+
+async function loadAdminUsersList() {
+  const container = document.getElementById('admin-users-list');
+  if (!container) return;
+
+  try {
+    const res = await authFetch('/api/admin/users');
+    if (!res.ok) throw new Error('Failed to load admins');
+    const data = await res.json();
+
+    container.innerHTML = data.users.map(u => `
+      <div class="admin-user-row">
+        <div class="admin-user-meta">
+          <div class="admin-user-name">
+            <span>${escapeHtml(u.display_name || u.username)}</span>
+            <span class="card-badge-pill ${u.is_owner ? 'badge-emerald' : 'badge-violet'}">
+              ${u.is_owner ? 'Superadmin (Owner)' : 'Admin'}
+            </span>
+          </div>
+          <span class="admin-user-created">@${escapeHtml(u.username)} • Added: ${escapeHtml(u.created_at || 'Default')}</span>
+        </div>
+        ${!u.is_owner ? `
+          <button class="btn-danger-sm" onclick="removeAdminUser('${escapeHtml(u.username)}')">Remove</button>
+        ` : '<span class="text-muted" style="font-size:0.75rem;">Primary</span>'}
+      </div>
+    `).join('');
+  } catch (err) {
+    container.innerHTML = `<p class="form-hint">Could not load users: ${err.message}</p>`;
+  }
+}
+
+async function handleAddAdmin(e) {
+  e.preventDefault();
+  const username = document.getElementById('new-admin-user').value.trim();
+  const displayName = document.getElementById('new-admin-display').value.trim();
+  const password = document.getElementById('new-admin-pass').value;
+
+  try {
+    const res = await authFetch('/api/admin/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, display_name: displayName, password, role: 'admin' })
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Could not add admin');
+
+    showToast(`Admin user '${username}' added!`, 'success');
+    e.target.reset();
+    await loadAdminUsersList();
+  } catch (err) {
+    showToast(`Error: ${err.message}`, 'error');
+  }
+}
+
+window.removeAdminUser = async function(username) {
+  if (!confirm(`Are you sure you want to revoke admin privileges from ${username}?`)) return;
+
+  try {
+    const res = await authFetch(`/api/admin/users/${encodeURIComponent(username)}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Failed to remove admin');
+    }
+    showToast(`Admin '${username}' removed.`, 'info');
+    await loadAdminUsersList();
+  } catch (err) {
+    showToast(`Error: ${err.message}`, 'error');
+  }
+};
+
+async function loadSecuritySettings() {
+  const container = document.getElementById('trusted-ips-list');
+  if (!container) return;
+
+  try {
+    const res = await authFetch('/api/admin/security');
+    if (!res.ok) throw new Error('Failed to load security config');
+    const data = await res.json();
+
+    container.innerHTML = data.trusted_ips.map(ip => `
+      <span class="ip-chip">
+        <span>${escapeHtml(ip)}</span>
+        ${!['127.0.0.1', '::1', 'localhost'].includes(ip) ? `
+          <button class="chip-del-btn" onclick="removeTrustedIp('${escapeHtml(ip)}')">&times;</button>
+        ` : ''}
+      </span>
+    `).join('');
+  } catch (err) {
+    container.innerHTML = `<p class="form-hint">Could not load trusted IPs: ${err.message}</p>`;
+  }
+}
+
+async function handleAddIp(e) {
+  e.preventDefault();
+  const input = document.getElementById('new-ip-pattern');
+  const pattern = input.value.trim();
+
+  try {
+    const res = await authFetch('/api/admin/security/trusted-ips', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip_pattern: pattern })
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Failed to add IP');
+    }
+
+    showToast(`IP '${pattern}' added to whitelist.`, 'success');
+    input.value = '';
+    await loadSecuritySettings();
+  } catch (err) {
+    showToast(`Error: ${err.message}`, 'error');
+  }
+}
+
+async function handleWhitelistCurrentIp() {
+  if (!state.clientIp) return;
+  try {
+    const res = await authFetch('/api/admin/security/trusted-ips', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip_pattern: state.clientIp })
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Failed to whitelist IP');
+    }
+    showToast(`Current IP (${state.clientIp}) is now whitelisted!`, 'success');
+    state.isIpTrusted = true;
+    await loadSecuritySettings();
+    updateAuthUI();
+  } catch (err) {
+    showToast(`Error: ${err.message}`, 'error');
+  }
+}
+
+window.removeTrustedIp = async function(ip) {
+  try {
+    const res = await authFetch(`/api/admin/security/trusted-ips/${encodeURIComponent(ip)}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Failed to remove IP');
+    }
+    showToast(`IP '${ip}' removed.`, 'info');
+    await loadSecuritySettings();
+  } catch (err) {
+    showToast(`Error: ${err.message}`, 'error');
+  }
+};
+
+async function handleChangePassword(e) {
+  e.preventDefault();
+  const currentPassword = document.getElementById('curr-pass').value;
+  const newPassword = document.getElementById('new-pass').value;
+
+  try {
+    const res = await authFetch('/api/auth/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword })
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Could not update password');
+    }
+    showToast('Password updated successfully!', 'success');
+    e.target.reset();
+  } catch (err) {
+    showToast(`Error: ${err.message}`, 'error');
+  }
+}
+
+// ==========================================================================
 // System Status & Metrics
 // ==========================================================================
 
@@ -97,14 +516,9 @@ async function initSystemStatus() {
     const statusPill = document.getElementById('system-status-text');
     const userText = document.getElementById('system-user-text');
     const diskStat = document.getElementById('stat-disk-free');
-    const platformStat = document.getElementById('stat-server-platform');
 
     if (statusPill) statusPill.textContent = 'Server Online';
     if (userText) userText.textContent = `@${data.github.user}`;
-    if (platformStat) {
-      const isLinux = data.platform.toLowerCase().includes('linux');
-      platformStat.textContent = isLinux ? 'Ubuntu Linux' : 'Windows (Dev)';
-    }
     if (diskStat && data.disk) {
       diskStat.textContent = `${data.disk.free_gb} GB`;
     }
@@ -127,18 +541,15 @@ function init3DCube() {
 
   if (!cube || !dragArea) return;
 
-  // Apply Transform
   function updateCubeTransform() {
     cube.style.transform = `rotateX(${state.rotationX}deg) rotateY(${state.rotationY}deg)`;
   }
 
-  // Animation Loop with Inertia
   function animateCube() {
     if (!state.isDragging) {
       if (state.isAutoRotating) {
         state.rotationY += 0.28;
       }
-      // Apply momentum decay
       if (Math.abs(state.velocityX) > 0.01 || Math.abs(state.velocityY) > 0.01) {
         state.rotationY += state.velocityX;
         state.rotationX -= state.velocityY;
@@ -151,7 +562,6 @@ function init3DCube() {
   }
   state.animationFrameId = requestAnimationFrame(animateCube);
 
-  // Mouse / Touch Drag Handlers
   function startDrag(clientX, clientY) {
     state.isDragging = true;
     state.lastMouseX = clientX;
@@ -180,30 +590,22 @@ function init3DCube() {
     state.isDragging = false;
   }
 
-  // Mouse Events
   dragArea.addEventListener('mousedown', (e) => {
-    // Only drag with left mouse button
     if (e.button === 0) startDrag(e.clientX, e.clientY);
   });
   window.addEventListener('mousemove', (e) => moveDrag(e.clientX, e.clientY));
   window.addEventListener('mouseup', endDrag);
 
-  // Touch Events
   dragArea.addEventListener('touchstart', (e) => {
-    if (e.touches.length === 1) {
-      startDrag(e.touches[0].clientX, e.touches[0].clientY);
-    }
+    if (e.touches.length === 1) startDrag(e.touches[0].clientX, e.touches[0].clientY);
   }, { passive: true });
 
   window.addEventListener('touchmove', (e) => {
-    if (e.touches.length === 1) {
-      moveDrag(e.touches[0].clientX, e.touches[0].clientY);
-    }
+    if (e.touches.length === 1) moveDrag(e.touches[0].clientX, e.touches[0].clientY);
   }, { passive: true });
 
   window.addEventListener('touchend', endDrag);
 
-  // Controls
   if (toggleBtn) {
     toggleBtn.addEventListener('click', () => {
       state.isAutoRotating = !state.isAutoRotating;
@@ -221,10 +623,8 @@ function init3DCube() {
     });
   }
 
-  // Click on Cube Face Navigation
   document.querySelectorAll('.cube-face').forEach((face) => {
-    face.addEventListener('click', (e) => {
-      // If was dragging significantly, ignore click
+    face.addEventListener('click', () => {
       if (Math.abs(state.velocityX) > 1.5 || Math.abs(state.velocityY) > 1.5) return;
       const target = face.dataset.target;
       if (!target) return;
@@ -247,14 +647,10 @@ async function initProjectsCMS() {
   await loadProjects();
 
   const addBtn = document.getElementById('btn-add-project-banner');
-  if (addBtn) {
-    addBtn.addEventListener('click', () => openProjectModal());
-  }
+  if (addBtn) addBtn.addEventListener('click', () => openProjectModal());
 
   const form = document.getElementById('form-edit-project');
-  if (form) {
-    form.addEventListener('submit', handleSaveProject);
-  }
+  if (form) form.addEventListener('submit', handleSaveProject);
 }
 
 async function loadProjects() {
@@ -278,9 +674,11 @@ function renderProjects() {
   if (!grid) return;
 
   if (state.projects.length === 0) {
-    grid.innerHTML = `<div class="loading-spinner-wrapper"><p>No projects configured yet. Click "Add Project" above!</p></div>`;
+    grid.innerHTML = `<div class="loading-spinner-wrapper"><p>No projects configured yet.</p></div>`;
     return;
   }
+
+  const isLogged = Boolean(state.user);
 
   grid.innerHTML = state.projects.map((p) => {
     const badgeColor = p.badge_color || 'cyan';
@@ -290,14 +688,16 @@ function renderProjects() {
       <div class="project-card" data-id="${escapeHtml(p.id)}">
         <div class="card-top">
           <span class="card-badge-pill badge-${escapeHtml(badgeColor)}">${escapeHtml(p.badge || 'Project')}</span>
-          <div class="card-actions-quick">
-            <button class="card-menu-btn" onclick="editProject('${p.id}')" title="Edit Card">
-              <svg class="icon" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-            </button>
-            <button class="card-menu-btn" onclick="deleteProject('${p.id}')" title="Delete Card">
-              <svg class="icon" viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-            </button>
-          </div>
+          ${isLogged ? `
+            <div class="card-actions-quick">
+              <button class="card-menu-btn" onclick="editProject('${p.id}')" title="Edit Card">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+              </button>
+              <button class="card-menu-btn" onclick="deleteProject('${p.id}')" title="Delete Card">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              </button>
+            </div>
+          ` : ''}
         </div>
 
         <div class="card-body">
@@ -323,6 +723,12 @@ function renderProjects() {
 }
 
 function openProjectModal(project = null) {
+  if (!state.user) {
+    showToast('Admin authentication required to manage project cards.', 'error');
+    openLoginModal();
+    return;
+  }
+
   const modal = document.getElementById('modal-edit-project');
   const title = document.getElementById('modal-project-title');
   const form = document.getElementById('form-edit-project');
@@ -359,8 +765,11 @@ window.editProject = function(id) {
 window.deleteProject = async function(id) {
   if (!confirm(`Are you sure you want to delete this project card?`)) return;
   try {
-    const res = await fetch(`/api/cms/projects/${encodeURIComponent(id)}`, { method: 'DELETE' });
-    if (!res.ok) throw new Error('Failed to delete project');
+    const res = await authFetch(`/api/cms/projects/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Failed to delete project');
+    }
     showToast('Project card removed.', 'info');
     await loadProjects();
   } catch (err) {
@@ -370,7 +779,6 @@ window.deleteProject = async function(id) {
 
 async function handleSaveProject(e) {
   e.preventDefault();
-  const form = e.target;
   const editId = document.getElementById('project-edit-id').value.trim();
 
   const payload = {
@@ -391,7 +799,7 @@ async function handleSaveProject(e) {
   const method = isEdit ? 'PUT' : 'POST';
 
   try {
-    const res = await fetch(endpoint, {
+    const res = await authFetch(endpoint, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -416,7 +824,6 @@ async function handleSaveProject(e) {
 async function initGitHubRepos() {
   await loadGitHubRepos();
 
-  // Refresh Repos Button
   const refreshBtn = document.getElementById('btn-refresh-repos');
   const refreshIcon = document.getElementById('refresh-icon');
   if (refreshBtn) {
@@ -428,7 +835,18 @@ async function initGitHubRepos() {
     });
   }
 
-  // Live Search Input
+  const createRepoAction = document.getElementById('btn-create-repo-action');
+  if (createRepoAction) {
+    createRepoAction.addEventListener('click', () => {
+      if (!state.user) {
+        showToast('Admin login required to create GitHub repositories.', 'error');
+        openLoginModal();
+      } else {
+        document.getElementById('modal-new-repo').classList.add('active');
+      }
+    });
+  }
+
   const searchInput = document.getElementById('repo-search-input');
   const clearBtn = document.getElementById('btn-clear-search');
   if (searchInput) {
@@ -448,11 +866,8 @@ async function initGitHubRepos() {
     });
   }
 
-  // Create Repo Form
   const createForm = document.getElementById('form-create-repo');
-  if (createForm) {
-    createForm.addEventListener('submit', handleCreateRepo);
-  }
+  if (createForm) createForm.addEventListener('submit', handleCreateRepo);
 }
 
 async function loadGitHubRepos(force = false) {
@@ -519,11 +934,7 @@ function filterAndRenderRepos() {
   });
 
   if (filtered.length === 0) {
-    grid.innerHTML = `
-      <div class="loading-spinner-wrapper">
-        <p>No matching repositories found.</p>
-      </div>
-    `;
+    grid.innerHTML = `<div class="loading-spinner-wrapper"><p>No matching repositories found.</p></div>`;
     return;
   }
 
@@ -580,7 +991,6 @@ window.copyCloneUrl = function(url) {
 
 async function handleCreateRepo(e) {
   e.preventDefault();
-  const form = e.target;
   const submitBtn = document.getElementById('btn-submit-create-repo');
   const btnText = submitBtn.querySelector('.btn-text');
   const spinner = submitBtn.querySelector('.btn-spinner');
@@ -597,7 +1007,7 @@ async function handleCreateRepo(e) {
   submitBtn.disabled = true;
 
   try {
-    const res = await fetch('/api/repos/create', {
+    const res = await authFetch('/api/repos/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -608,9 +1018,8 @@ async function handleCreateRepo(e) {
 
     showToast(`Repository ${data.repo.name} created!`, 'success');
     document.getElementById('modal-new-repo').classList.remove('active');
-    form.reset();
+    e.target.reset();
 
-    // Reload repos
     await loadGitHubRepos(true);
   } catch (err) {
     showToast(`GitHub Error: ${err.message}`, 'error');
@@ -626,7 +1035,9 @@ async function handleCreateRepo(e) {
 // ==========================================================================
 
 async function initServerFileManager() {
-  await loadServerFolders('');
+  if (state.user) {
+    await loadServerFolders('');
+  }
 
   const refreshBtn = document.getElementById('btn-refresh-server-folders');
   if (refreshBtn) {
@@ -639,16 +1050,19 @@ async function initServerFileManager() {
   }
 
   const form = document.getElementById('form-create-folder');
-  if (form) {
-    form.addEventListener('submit', handleCreateFolder);
-  }
+  if (form) form.addEventListener('submit', handleCreateFolder);
 }
 
 async function loadServerFolders(subpath = '') {
+  if (!state.user) return;
+
   const listEl = document.getElementById('server-file-list');
   try {
-    const res = await fetch(`/api/server/folders?subpath=${encodeURIComponent(subpath)}`);
-    if (!res.ok) throw new Error('Could not read server folder');
+    const res = await authFetch(`/api/server/folders?subpath=${encodeURIComponent(subpath)}`);
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Could not read server folder');
+    }
     const data = await res.json();
 
     state.serverCurrentPath = data.current_path;
@@ -686,7 +1100,7 @@ function renderBreadcrumbs(currentPath) {
   `;
 
   let accumulated = '';
-  parts.forEach((p, idx) => {
+  parts.forEach((p) => {
     if (!p) return;
     accumulated = accumulated ? `${accumulated}/${p}` : p;
     html += `
@@ -707,11 +1121,7 @@ function renderFileList(items) {
   if (!container) return;
 
   if (!items || items.length === 0) {
-    container.innerHTML = `
-      <div class="loading-spinner-wrapper">
-        <p>This directory is currently empty.</p>
-      </div>
-    `;
+    container.innerHTML = `<div class="loading-spinner-wrapper"><p>This directory is currently empty.</p></div>`;
     return;
   }
 
@@ -746,6 +1156,12 @@ function formatBytes(bytes) {
 }
 
 function openCreateFolderModal(parentPath = '') {
+  if (!state.user) {
+    showToast('Admin login required to create server folders.', 'error');
+    openLoginModal();
+    return;
+  }
+
   const modal = document.getElementById('modal-new-folder');
   const targetPreview = document.getElementById('modal-folder-target-preview');
   const hiddenInput = document.getElementById('folder-parent-path');
@@ -761,7 +1177,6 @@ function openCreateFolderModal(parentPath = '') {
 
 async function handleCreateFolder(e) {
   e.preventDefault();
-  const form = e.target;
   const submitBtn = document.getElementById('btn-submit-create-folder');
   const btnText = submitBtn.querySelector('.btn-text');
   const spinner = submitBtn.querySelector('.btn-spinner');
@@ -776,7 +1191,7 @@ async function handleCreateFolder(e) {
   submitBtn.disabled = true;
 
   try {
-    const res = await fetch('/api/server/folders/create', {
+    const res = await authFetch('/api/server/folders/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -787,9 +1202,8 @@ async function handleCreateFolder(e) {
 
     showToast(`Folder '${payload.folder_name}' created on server!`, 'success');
     document.getElementById('modal-new-folder').classList.remove('active');
-    form.reset();
+    e.target.reset();
 
-    // Reload directory
     await loadServerFolders(payload.parent_path);
   } catch (err) {
     showToast(`Error: ${err.message}`, 'error');
@@ -801,22 +1215,26 @@ async function handleCreateFolder(e) {
 }
 
 // ==========================================================================
-// Modals Handling
+// Modals System
 // ==========================================================================
 
 function initModals() {
-  // Open buttons
   const openRepoBtn = document.getElementById('btn-open-new-repo');
-  const createRepoAction = document.getElementById('btn-create-repo-action');
   const openFolderBtn = document.getElementById('btn-open-new-folder');
   const openAddProjectBtn = document.getElementById('btn-open-add-project');
 
-  if (openRepoBtn) openRepoBtn.addEventListener('click', () => document.getElementById('modal-new-repo').classList.add('active'));
-  if (createRepoAction) createRepoAction.addEventListener('click', () => document.getElementById('modal-new-repo').classList.add('active'));
+  if (openRepoBtn) openRepoBtn.addEventListener('click', () => {
+    if (!state.user) {
+      showToast('Admin login required to create GitHub repositories.', 'error');
+      openLoginModal();
+    } else {
+      document.getElementById('modal-new-repo').classList.add('active');
+    }
+  });
+
   if (openFolderBtn) openFolderBtn.addEventListener('click', () => openCreateFolderModal(state.serverCurrentPath));
   if (openAddProjectBtn) openAddProjectBtn.addEventListener('click', () => openProjectModal());
 
-  // Close buttons
   document.querySelectorAll('[data-close]').forEach(btn => {
     btn.addEventListener('click', () => {
       const modalId = btn.dataset.close;
@@ -825,14 +1243,12 @@ function initModals() {
     });
   });
 
-  // Close on outside click
   document.querySelectorAll('.modal-overlay').forEach(modal => {
     modal.addEventListener('click', (e) => {
       if (e.target === modal) modal.classList.remove('active');
     });
   });
 
-  // Close on Escape key
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));

@@ -1,0 +1,23 @@
+{
+  "users": [
+    {
+      "username": "bonz",
+      "display_name": "Bonz (Superadmin)",
+      "role": "superadmin",
+      "password_hash": "6791567a550f48eba5b9eb5bf088ca1c$85d6490a9ca7e3a4dd2e0662729a4270055f09e7e275f7d55833972001e96e81",
+      "created_at": "2026-09-08 07:30:16",
+      "can_add_admins": true
+    }
+  ],
+  "security": {
+    "require_ip_whitelist": true,
+    "trusted_ips": [
+      "127.0.0.1",
+      "::1",
+      "68.146.118.91",
+      "10.0.0.*",
+      "172.27.208.*",
+      "localhost"
+    ]
+  }
+}

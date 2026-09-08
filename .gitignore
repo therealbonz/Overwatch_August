@@ -11,6 +11,7 @@ venv/
 # Environments
 .env
 .env.local
+backend/sessions.json
 
 # IDE
 .vscode/

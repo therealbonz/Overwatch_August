@@ -9,11 +9,26 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query, status
+from fastapi import FastAPI, HTTPException, Query, status, Depends, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
+
+from backend.auth import (
+    get_client_ip,
+    is_ip_trusted,
+    get_current_user,
+    require_admin,
+    require_superadmin,
+    create_session,
+    destroy_session,
+    hash_password,
+    verify_password,
+    init_auth_data,
+    save_auth_data,
+    get_token_from_request
+)
 
 # Load environment variables if .env exists
 try:
@@ -28,7 +43,6 @@ FRONTEND_DIR = PROJECT_ROOT / "frontend"
 CMS_FILE = BASE_DIR / "cms_data.json"
 
 # Server Base Directory for folder creation and browsing
-# Production default: /var/www, Development fallback: parent of PROJECT_ROOT or BASE_DIR
 if os.name == "nt":
     DEFAULT_SERVER_DIR = str(PROJECT_ROOT.parent)
 else:
@@ -38,9 +52,9 @@ SERVER_BASE_DIR = Path(os.environ.get("SERVER_BASE_DIR", DEFAULT_SERVER_DIR)).re
 GITHUB_USER = os.environ.get("GITHUB_USER", "therealbonz")
 
 app = FastAPI(
-    title="therealbonz.com Launchpad & CMS",
-    description="Central project hub, GitHub integration, server manager, and 3D studio.",
-    version="1.0.0"
+    title="therealbonz.com Launchpad & Secure CMS",
+    description="Central project hub with multi-factor admin locking to bonz, machine IP, and user credentials.",
+    version="1.1.0"
 )
 
 # Enable CORS for local development
@@ -102,11 +116,8 @@ def write_cms_data(data: Dict[str, Any]):
 
 def resolve_safe_server_path(subpath: str = "") -> Path:
     """Resolves and validates that the requested path is inside SERVER_BASE_DIR."""
-    # Strip any leading slashes or Windows drive specifiers from relative subpath
     clean_subpath = subpath.strip().lstrip("/\\")
     resolved = (SERVER_BASE_DIR / clean_subpath).resolve()
-    
-    # Check if resolved path is within SERVER_BASE_DIR
     try:
         resolved.relative_to(SERVER_BASE_DIR)
     except ValueError:
@@ -118,8 +129,30 @@ def resolve_safe_server_path(subpath: str = "") -> Path:
 
 
 # ---------------------------------------------------------
-# Models
+# Request Models
 # ---------------------------------------------------------
+
+class LoginRequest(BaseModel):
+    username: str = Field(..., min_length=1)
+    password: str = Field(..., min_length=1)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(..., min_length=6)
+
+
+class AddAdminRequest(BaseModel):
+    username: str = Field(..., min_length=2, max_length=50, pattern=r"^[A-Za-z0-9_.-]+$")
+    display_name: Optional[str] = Field(None, max_length=60)
+    password: str = Field(..., min_length=6)
+    role: Optional[str] = "admin"
+
+
+class AddTrustedIpRequest(BaseModel):
+    ip_pattern: str = Field(..., min_length=1, max_length=50)
+    comment: Optional[str] = Field(None, max_length=100)
+
 
 class CreateRepoRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_.-]+$")
@@ -149,16 +182,243 @@ class CMSProject(BaseModel):
 
 
 # ---------------------------------------------------------
-# API Endpoints
+# Authentication Endpoints
 # ---------------------------------------------------------
 
-@app.get("/api/system/status")
-async def get_system_status():
-    """Returns server host health, platform details, and GitHub authentication state."""
+@app.post("/api/auth/login")
+async def login(payload: LoginRequest, request: Request, response: Response):
+    """Authenticates admin user. Enforces IP whitelist verification and user credentials."""
+    client_ip = get_client_ip(request)
+
+    # 1. Check if client IP is authorized
+    if not is_ip_trusted(client_ip):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Access Denied: Admin login is locked to authorized IPs. Your IP ({client_ip}) is not on the whitelist."
+        )
+
+    # 2. Verify user credentials
+    auth_data = init_auth_data()
+    users = auth_data.get("users", [])
+    target_user = None
+
+    for u in users:
+        if u.get("username", "").lower() == payload.username.lower().strip():
+            target_user = u
+            break
+
+    if not target_user or not verify_password(payload.password, target_user.get("password_hash", "")):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username or password."
+        )
+
+    # 3. Create Session Token
+    token = create_session(
+        username=target_user["username"],
+        role=target_user.get("role", "admin"),
+        display_name=target_user.get("display_name", target_user["username"]),
+        client_ip=client_ip
+    )
+
+    # Set session cookie
+    response.set_cookie(
+        key="bonz_session_token",
+        value=token,
+        max_age=7 * 24 * 3600,
+        httponly=True,
+        samesite="lax",
+        secure=False  # Set True in production HTTPS
+    )
+
+    return {
+        "success": True,
+        "token": token,
+        "user": {
+            "username": target_user["username"],
+            "display_name": target_user.get("display_name", target_user["username"]),
+            "role": target_user.get("role", "admin"),
+            "can_add_admins": target_user.get("can_add_admins", False) or target_user.get("username").lower() == "bonz"
+        },
+        "client_ip": client_ip
+    }
+
+
+@app.get("/api/auth/me")
+async def get_me(request: Request):
+    """Returns authentication status, current user, client IP, and whitelist state."""
+    client_ip = get_client_ip(request)
+    trusted = is_ip_trusted(client_ip)
+    user = await get_current_user(request)
+
+    return {
+        "authenticated": user is not None,
+        "user": user,
+        "client_ip": client_ip,
+        "is_ip_trusted": trusted,
+        "is_superadmin": user is not None and (user.get("username").lower() == "bonz" or user.get("role") == "superadmin")
+    }
+
+
+@app.post("/api/auth/logout")
+async def logout(request: Request, response: Response):
+    """Revokes the current admin session."""
+    token = get_token_from_request(request)
+    if token:
+        destroy_session(token)
+    response.delete_cookie(key="bonz_session_token")
+    return {"success": True, "message": "Logged out successfully."}
+
+
+@app.post("/api/auth/change-password")
+async def change_password(payload: ChangePasswordRequest, admin: Dict[str, Any] = Depends(require_admin)):
+    """Allows authenticated admin to change their password."""
+    auth_data = init_auth_data()
+    users = auth_data.get("users", [])
+
+    for u in users:
+        if u.get("username", "").lower() == admin["username"].lower():
+            if not verify_password(payload.current_password, u.get("password_hash", "")):
+                raise HTTPException(status_code=400, detail="Current password incorrect.")
+            u["password_hash"] = hash_password(payload.new_password)
+            save_auth_data(auth_data)
+            return {"success": True, "message": "Password updated successfully."}
+
+    raise HTTPException(status_code=404, detail="User not found.")
+
+
+# ---------------------------------------------------------
+# Admin User & Security Management (Superadmin: bonz only)
+# ---------------------------------------------------------
+
+@app.get("/api/admin/users")
+async def list_admin_users(superadmin: Dict[str, Any] = Depends(require_superadmin)):
+    """Lists all admin accounts. Superadmin bonz only."""
+    auth_data = init_auth_data()
+    sanitized = []
+    for u in auth_data.get("users", []):
+        sanitized.append({
+            "username": u.get("username"),
+            "display_name": u.get("display_name"),
+            "role": u.get("role", "admin"),
+            "created_at": u.get("created_at"),
+            "is_owner": u.get("username").lower() == "bonz"
+        })
+    return {"users": sanitized}
+
+
+@app.post("/api/admin/users")
+async def add_admin_user(payload: AddAdminRequest, superadmin: Dict[str, Any] = Depends(require_superadmin)):
+    """Adds a new authorized admin user. Superadmin bonz only."""
+    auth_data = init_auth_data()
+    users = auth_data.get("users", [])
+
+    clean_user = payload.username.strip().lower()
+    for u in users:
+        if u.get("username", "").lower() == clean_user:
+            raise HTTPException(status_code=409, detail=f"User '{clean_user}' already exists.")
+
+    new_user = {
+        "username": clean_user,
+        "display_name": payload.display_name.strip() if payload.display_name else clean_user,
+        "role": payload.role or "admin",
+        "password_hash": hash_password(payload.password),
+        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "created_by": superadmin["username"],
+        "can_add_admins": False
+    }
+
+    users.append(new_user)
+    auth_data["users"] = users
+    save_auth_data(auth_data)
+
+    return {
+        "success": True,
+        "message": f"Admin user '{clean_user}' added successfully.",
+        "user": {
+            "username": new_user["username"],
+            "display_name": new_user["display_name"],
+            "role": new_user["role"]
+        }
+    }
+
+
+@app.delete("/api/admin/users/{username}")
+async def remove_admin_user(username: str, superadmin: Dict[str, Any] = Depends(require_superadmin)):
+    """Removes an admin user. Primary owner bonz cannot be removed."""
+    if username.lower() == "bonz":
+        raise HTTPException(status_code=400, detail="Cannot delete primary superadmin account 'bonz'.")
+
+    auth_data = init_auth_data()
+    users = auth_data.get("users", [])
+    filtered = [u for u in users if u.get("username", "").lower() != username.lower()]
+
+    if len(filtered) == len(users):
+        raise HTTPException(status_code=404, detail="Admin user not found.")
+
+    auth_data["users"] = filtered
+    save_auth_data(auth_data)
+    return {"success": True, "message": f"Admin '{username}' removed."}
+
+
+@app.get("/api/admin/security")
+async def get_security_settings(request: Request, superadmin: Dict[str, Any] = Depends(require_superadmin)):
+    """Returns security configuration and trusted IP whitelist."""
+    auth_data = init_auth_data()
+    security = auth_data.get("security", {})
+    return {
+        "client_ip": get_client_ip(request),
+        "require_ip_whitelist": security.get("require_ip_whitelist", True),
+        "trusted_ips": security.get("trusted_ips", [])
+    }
+
+
+@app.post("/api/admin/security/trusted-ips")
+async def add_trusted_ip(payload: AddTrustedIpRequest, superadmin: Dict[str, Any] = Depends(require_superadmin)):
+    """Adds an IP or CIDR wildcard to the admin whitelist."""
+    pattern = payload.ip_pattern.strip()
+    if not pattern:
+        raise HTTPException(status_code=400, detail="Invalid IP pattern.")
+
+    auth_data = init_auth_data()
+    security = auth_data.setdefault("security", {})
+    trusted = security.setdefault("trusted_ips", [])
+
+    if pattern not in trusted:
+        trusted.append(pattern)
+        save_auth_data(auth_data)
+
+    return {"success": True, "message": f"IP pattern '{pattern}' added to whitelist.", "trusted_ips": trusted}
+
+
+@app.delete("/api/admin/security/trusted-ips/{ip_pattern}")
+async def remove_trusted_ip(ip_pattern: str, superadmin: Dict[str, Any] = Depends(require_superadmin)):
+    """Removes an IP pattern from the whitelist (localhost cannot be removed)."""
+    if ip_pattern in ("127.0.0.1", "::1", "localhost"):
+        raise HTTPException(status_code=400, detail="Cannot remove local loopback from whitelist.")
+
+    auth_data = init_auth_data()
+    security = auth_data.setdefault("security", {})
+    trusted = security.setdefault("trusted_ips", [])
+
+    if ip_pattern in trusted:
+        trusted.remove(ip_pattern)
+        save_auth_data(auth_data)
+
+    return {"success": True, "message": f"IP '{ip_pattern}' removed from whitelist.", "trusted_ips": trusted}
+
+
+# ---------------------------------------------------------
+# Public & Protected Dashboard Endpoints
+# ---------------------------------------------------------
+
+@app.api_route("/api/system/status", methods=["GET", "HEAD"])
+async def get_system_status(request: Request):
+    """Returns public server host health, platform, and client IP info."""
     token = get_github_token()
     token_preview = f"{token[:4]}...{token[-4:]}" if token and len(token) > 8 else None
+    client_ip = get_client_ip(request)
 
-    # Disk usage for server base directory
     try:
         stat = shutil.disk_usage(str(SERVER_BASE_DIR))
         disk_info = {
@@ -176,6 +436,8 @@ async def get_system_status():
         "platform": platform.platform(),
         "python_version": platform.python_version(),
         "server_base_dir": str(SERVER_BASE_DIR),
+        "client_ip": client_ip,
+        "is_ip_trusted": is_ip_trusted(client_ip),
         "disk": disk_info,
         "github": {
             "user": GITHUB_USER,
@@ -185,9 +447,9 @@ async def get_system_status():
     }
 
 
-@app.get("/api/repos")
+@app.api_route("/api/repos", methods=["GET", "HEAD"])
 async def list_github_repos(force: bool = False):
-    """Fetches all repositories for therealbonz from GitHub REST API."""
+    """Public: Fetches repositories for therealbonz from GitHub REST API."""
     now = time.time()
     if not force and repo_cache["data"] and (now - repo_cache["last_fetched"]) < CACHE_TTL:
         return {
@@ -206,7 +468,6 @@ async def list_github_repos(force: bool = False):
         headers["Authorization"] = f"Bearer {token}"
 
     async with httpx.AsyncClient(timeout=10.0) as client:
-        # Fetch user info
         user_info = None
         try:
             user_url = "https://api.github.com/user" if token else f"https://api.github.com/users/{GITHUB_USER}"
@@ -216,7 +477,6 @@ async def list_github_repos(force: bool = False):
         except Exception:
             pass
 
-        # Fetch repositories
         repos_url = "https://api.github.com/user/repos?per_page=100&sort=updated" if token else f"https://api.github.com/users/{GITHUB_USER}/repos?per_page=100&sort=updated"
         try:
             r_resp = await client.get(repos_url, headers=headers)
@@ -232,10 +492,8 @@ async def list_github_repos(force: bool = False):
                 detail=f"Failed to connect to GitHub API: {str(e)}"
             )
 
-    # Format repo objects
     formatted = []
     for r in raw_repos:
-        # Ensure repo belongs to user if authenticated
         owner = r.get("owner", {}).get("login", "")
         if owner.lower() != GITHUB_USER.lower():
             continue
@@ -270,8 +528,8 @@ async def list_github_repos(force: bool = False):
 
 
 @app.post("/api/repos/create")
-async def create_github_repo(payload: CreateRepoRequest):
-    """Creates a new repository on GitHub under therealbonz account."""
+async def create_github_repo(payload: CreateRepoRequest, admin: Dict[str, Any] = Depends(require_admin)):
+    """[LOCKED TO ADMIN] Creates a new repository on GitHub."""
     token = get_github_token()
     if not token:
         raise HTTPException(
@@ -302,7 +560,6 @@ async def create_github_repo(payload: CreateRepoRequest):
             )
         new_repo = resp.json()
 
-    # Invalidate cache so new repo shows up immediately
     repo_cache["last_fetched"] = 0
 
     return {
@@ -319,8 +576,11 @@ async def create_github_repo(payload: CreateRepoRequest):
 
 
 @app.get("/api/server/folders")
-async def list_server_folders(subpath: str = Query("", description="Relative path under server base dir")):
-    """Lists folders and files inside the specified server directory path."""
+async def list_server_folders(
+    subpath: str = Query("", description="Relative path under server base dir"),
+    admin: Dict[str, Any] = Depends(require_admin)
+):
+    """[LOCKED TO ADMIN] Lists folders and files inside server directory."""
     target_path = resolve_safe_server_path(subpath)
 
     if not target_path.exists():
@@ -343,7 +603,6 @@ async def list_server_folders(subpath: str = Query("", description="Relative pat
     except PermissionError:
         raise HTTPException(status_code=403, detail="Permission denied reading directory.")
 
-    # Sort directories first, then alphabetically
     items.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
 
     curr_rel = str(target_path.relative_to(SERVER_BASE_DIR)).replace("\\", "/")
@@ -359,14 +618,13 @@ async def list_server_folders(subpath: str = Query("", description="Relative pat
 
 
 @app.post("/api/server/folders/create")
-async def create_server_folder(payload: CreateFolderRequest):
-    """Creates a new folder on the server in the designated directory root."""
+async def create_server_folder(payload: CreateFolderRequest, admin: Dict[str, Any] = Depends(require_admin)):
+    """[LOCKED TO ADMIN] Creates a new folder on the server."""
     name = payload.folder_name.strip()
-    # Ensure no path traversal in folder_name
     if not name or "/" in name or "\\" in name or name in (".", ".."):
         raise HTTPException(
             status_code=400,
-            detail="Invalid folder name. Folder name cannot contain path separators or parent directory references."
+            detail="Invalid folder name. Folder name cannot contain path separators or parent references."
         )
 
     parent = resolve_safe_server_path(payload.parent_path or "")
@@ -400,9 +658,9 @@ async def create_server_folder(payload: CreateFolderRequest):
     }
 
 
-@app.get("/api/cms/projects")
+@app.api_route("/api/cms/projects", methods=["GET", "HEAD"])
 async def get_cms_projects():
-    """Returns the list of launchpad items."""
+    """Public: Returns the list of launchpad items."""
     data = read_cms_data()
     projects = data.get("projects", [])
     projects.sort(key=lambda p: p.get("priority", 99))
@@ -410,16 +668,14 @@ async def get_cms_projects():
 
 
 @app.post("/api/cms/projects")
-async def add_cms_project(project: CMSProject):
-    """Adds a new launchpad item to the CMS."""
+async def add_cms_project(project: CMSProject, admin: Dict[str, Any] = Depends(require_admin)):
+    """[LOCKED TO ADMIN] Adds a new launchpad item to the CMS."""
     data = read_cms_data()
     projects = data.get("projects", [])
 
-    # Generate an ID if omitted
     proj_id = project.id or project.title.lower().replace(" ", "-")
     clean_id = "".join(c for c in proj_id if c.isalnum() or c in "-_")
 
-    # Check for existing
     for p in projects:
         if p.get("id") == clean_id:
             raise HTTPException(status_code=409, detail=f"Project with ID '{clean_id}' already exists.")
@@ -434,8 +690,8 @@ async def add_cms_project(project: CMSProject):
 
 
 @app.put("/api/cms/projects/{project_id}")
-async def update_cms_project(project_id: str, project: CMSProject):
-    """Updates an existing launchpad project item."""
+async def update_cms_project(project_id: str, project: CMSProject, admin: Dict[str, Any] = Depends(require_admin)):
+    """[LOCKED TO ADMIN] Updates an existing launchpad project item."""
     data = read_cms_data()
     projects = data.get("projects", [])
 
@@ -457,8 +713,8 @@ async def update_cms_project(project_id: str, project: CMSProject):
 
 
 @app.delete("/api/cms/projects/{project_id}")
-async def delete_cms_project(project_id: str):
-    """Deletes a launchpad project item."""
+async def delete_cms_project(project_id: str, admin: Dict[str, Any] = Depends(require_admin)):
+    """[LOCKED TO ADMIN] Deletes a launchpad project item."""
     data = read_cms_data()
     projects = data.get("projects", [])
 
@@ -490,7 +746,6 @@ if FRONTEND_DIR.exists():
 
     @app.api_route("/{full_path:path}", methods=["GET", "HEAD"])
     async def serve_spa(full_path: str):
-        # If API route not found, let FastAPI handle 404
         if full_path.startswith("api/"):
             raise HTTPException(status_code=404, detail="API endpoint not found")
         file_path = FRONTEND_DIR / full_path
