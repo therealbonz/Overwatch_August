@@ -15,20 +15,43 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from backend.auth import (
-    get_client_ip,
-    is_ip_trusted,
-    get_current_user,
-    require_admin,
-    require_superadmin,
-    create_session,
-    destroy_session,
-    hash_password,
-    verify_password,
-    init_auth_data,
-    save_auth_data,
-    get_token_from_request
-)
+BASE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = BASE_DIR.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
+try:
+    from backend.auth import (
+        get_client_ip,
+        is_ip_trusted,
+        get_current_user,
+        require_admin,
+        require_superadmin,
+        create_session,
+        destroy_session,
+        hash_password,
+        verify_password,
+        init_auth_data,
+        save_auth_data,
+        get_token_from_request
+    )
+except ImportError:
+    from auth import (
+        get_client_ip,
+        is_ip_trusted,
+        get_current_user,
+        require_admin,
+        require_superadmin,
+        create_session,
+        destroy_session,
+        hash_password,
+        verify_password,
+        init_auth_data,
+        save_auth_data,
+        get_token_from_request
+    )
 
 # Load environment variables if .env exists
 try:
@@ -37,8 +60,6 @@ try:
 except ImportError:
     pass
 
-BASE_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = BASE_DIR.parent
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
 CMS_FILE = BASE_DIR / "cms_data.json"
 

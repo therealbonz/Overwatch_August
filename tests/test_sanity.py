@@ -1,4 +1,7 @@
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from starlette.testclient import TestClient
 from backend.main import app
 
@@ -30,8 +33,14 @@ def run_tests():
     assert "Bonz2D Game" in titles
     print(f"[PASS] CMS projects API returned {len(projects)} projects: {titles}")
 
-    # 4. Test Server folders API
-    r4 = client.get("/api/server/folders")
+    # Log in as bonz
+    r_login = client.post("/api/auth/login", json={"username": "bonz", "password": "bonzadmin2026"})
+    assert r_login.status_code == 200
+    token = r_login.json()["token"]
+    auth_headers = {"Authorization": f"Bearer {token}"}
+
+    # 4. Test Server folders API (Admin protected)
+    r4 = client.get("/api/server/folders", headers=auth_headers)
     assert r4.status_code == 200
     folders = r4.json()
     assert "items" in folders
@@ -44,19 +53,19 @@ def run_tests():
     repo_names = [r["name"] for r in repos_data["repos"]]
     print(f"[PASS] GitHub repos API returned {repos_data['count']} repositories: {repo_names}")
 
-    # 6. Test CMS Project Add and Delete
+    # 6. Test CMS Project Add and Delete (Admin protected)
     new_proj = {
         "title": "Test Launch Project",
         "category": "Testing",
         "url": "https://example.com",
         "priority": 99
     }
-    r_add = client.post("/api/cms/projects", json=new_proj)
+    r_add = client.post("/api/cms/projects", json=new_proj, headers=auth_headers)
     assert r_add.status_code == 200, f"Add project failed: {r_add.text}"
     created_id = r_add.json()["project"]["id"]
     print(f"[PASS] CMS project created with id: {created_id}")
 
-    r_del = client.delete(f"/api/cms/projects/{created_id}")
+    r_del = client.delete(f"/api/cms/projects/{created_id}", headers=auth_headers)
     assert r_del.status_code == 200, f"Delete project failed: {r_del.text}"
     print(f"[PASS] CMS project deleted cleanly")
 

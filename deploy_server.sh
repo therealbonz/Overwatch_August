@@ -34,7 +34,7 @@ else
     $SUDO git reset --hard origin/main || true
 fi
 
-$SUDO chown -R $USER:$USER "$APP_DIR" 2>/dev/null || true
+$SUDO chown -R bonz:bonz "$APP_DIR" 2>/dev/null || true
 
 # 3. Create virtual environment & install requirements
 cd "$APP_DIR/backend"
@@ -59,6 +59,7 @@ ExecStart=$APP_DIR/backend/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 80
 Restart=always
 RestartSec=5
 Environment=PATH=$APP_DIR/backend/.venv/bin:/usr/bin:/bin
+Environment=PYTHONPATH=$APP_DIR:$APP_DIR/backend
 Environment=SERVER_BASE_DIR=/var/www
 Environment=GITHUB_USER=therealbonz
 
@@ -69,6 +70,16 @@ EOF"
 $SUDO systemctl daemon-reload
 $SUDO systemctl enable --now therealbonz-homepage
 $SUDO systemctl restart therealbonz-homepage
+
+# Verify service is running
+sleep 2
+if ! systemctl is-active --quiet therealbonz-homepage; then
+    echo "⚠️ Warning: therealbonz-homepage failed to start! Checking journal logs:"
+    journalctl -u therealbonz-homepage -n 25 --no-pager
+    exit 1
+else
+    echo "✓ therealbonz-homepage service is active and listening."
+fi
 
 # 5. Configure Nginx Reverse Proxy
 echo "Configuring Nginx reverse proxy for root / ..."
