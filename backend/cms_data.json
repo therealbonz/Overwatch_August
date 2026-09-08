@@ -1,0 +1,60 @@
+{
+  "projects": [
+    {
+      "id": "jsproject",
+      "title": "JsProject",
+      "subtitle": "AI Sales Automation & Cold Calling Platform",
+      "description": "Next-generation AI outbound platform with live calling, automated follow-ups, CRM synchronization, and interactive voice agent pipeline.",
+      "url": "http://therealbonz.com/JsProject/",
+      "github_url": "https://github.com/therealbonz/JsProject",
+      "badge": "Live Service",
+      "badge_color": "emerald",
+      "category": "AI / Fullstack",
+      "icon": "zap",
+      "featured": true,
+      "priority": 1
+    },
+    {
+      "id": "3dcubeproject",
+      "title": "3D Cube Project",
+      "subtitle": "Interactive 3D Engine & Reactive Wallpaper",
+      "description": "Hardware-accelerated 3D cube visualizer featuring smooth physics, multi-face gallery texturing, desktop wallpaper integration, and audio-reactive modes.",
+      "url": "#3d-cube-interactive",
+      "github_url": "https://github.com/therealbonz/gallery_windows_August",
+      "badge": "Interactive 3D",
+      "badge_color": "cyan",
+      "category": "3D & Graphics",
+      "icon": "box",
+      "featured": true,
+      "priority": 2
+    },
+    {
+      "id": "bonz2d",
+      "title": "Bonz2D Game",
+      "subtitle": "Action 2D Unity Adventure",
+      "description": "High-octane 2D action platformer made in Unity with fluid character physics, responsive controls, enemy AI behaviors, and dynamic camera system.",
+      "url": "https://github.com/therealbonz/Bonz2D",
+      "github_url": "https://github.com/therealbonz/Bonz2D",
+      "badge": "Unity 2D",
+      "badge_color": "violet",
+      "category": "Game Dev",
+      "icon": "gamepad",
+      "featured": true,
+      "priority": 3
+    },
+    {
+      "id": "gallery_suite",
+      "title": "Media Gallery Suite",
+      "subtitle": "Cloud-Synced Windows, Android & Web Suite",
+      "description": "High-performance fullstack media manager combining FastAPI backend services, modern React web dashboards, Android mobile client, and Windows wallpaper integration.",
+      "url": "https://github.com/therealbonz/gallery_frontend_August",
+      "github_url": "https://github.com/therealbonz/gallery_frontend_August",
+      "badge": "Cross-Platform",
+      "badge_color": "amber",
+      "category": "Ecosystem",
+      "icon": "images",
+      "featured": true,
+      "priority": 4
+    }
+  ]
+}

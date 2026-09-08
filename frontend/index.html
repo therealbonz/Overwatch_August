@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>therealbonz.com | Project Launchpad & CMS</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="dark-theme">
+  <!-- Toast Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Header / Navigation -->
+  <header class="site-header">
+    <div class="header-container">
+      <div class="brand">
+        <a href="/" class="brand-link">
+          <img src="/assets/favicon.svg" alt="therealbonz logo" class="brand-logo">
+          <div class="brand-text">
+            <span class="brand-name">therealbonz<span class="highlight">.com</span></span>
+            <span class="brand-tag">Central Command & CMS</span>
+          </div>
+        </a>
+      </div>
+
+      <nav class="nav-links">
+        <a href="#launchpad" class="nav-link active">Launchpad</a>
+        <a href="#3dcube-section" class="nav-link">3D Studio</a>
+        <a href="#repos-section" class="nav-link">GitHub Repos</a>
+        <a href="#server-section" class="nav-link">Server Files</a>
+      </nav>
+
+      <div class="header-actions">
+        <button class="btn btn-sm btn-outline" id="btn-open-new-repo" title="Create a new repository on GitHub">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          <span>New Repo</span>
+        </button>
+        <button class="btn btn-sm btn-outline" id="btn-open-new-folder" title="Create a new directory on the server">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+          <span>New Folder</span>
+        </button>
+        <button class="btn btn-sm btn-primary" id="btn-open-add-project" title="Add a custom launchpad project">
+          <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+          <span>Add Project</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Container -->
+  <main class="main-content">
+    
+    <!-- Hero / Server Status Banner -->
+    <section class="hero-section">
+      <div class="hero-content">
+        <div class="status-pill">
+          <span class="status-dot pulsating"></span>
+          <span id="system-status-text">Server Status: Loading...</span>
+          <span class="status-sep">•</span>
+          <span id="system-user-text">@therealbonz</span>
+        </div>
+        <h1 class="hero-title">Developer Launchpad &amp; <span class="gradient-text">Project Hub</span></h1>
+        <p class="hero-desc">
+          Live mission control for therealbonz.com. Instant access to interactive experiments, web applications, GitHub repositories, and server storage.
+        </p>
+
+        <!-- Quick Stats Grid -->
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-value" id="stat-repos-count">-</div>
+            <div class="stat-label">GitHub Repos</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="stat-projects-count">4</div>
+            <div class="stat-label">Launchpad Apps</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="stat-disk-free">-</div>
+            <div class="stat-label">Server Free Disk</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="stat-server-platform">Ubuntu</div>
+            <div class="stat-label">OS Platform</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Interactive 3D Cube Viewer Section -->
+    <section id="3dcube-section" class="interactive-cube-section">
+      <div class="section-header">
+        <div>
+          <span class="section-badge">Featured Experiment</span>
+          <h2 class="section-title">3D Cube Interactive Studio</h2>
+          <p class="section-subtitle">Real-time 3D physics viewport with draggable inertia, face navigation, and multi-project textures.</p>
+        </div>
+        <div class="cube-controls">
+          <button class="btn btn-sm btn-glass" id="btn-toggle-rotation">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+            <span id="cube-rot-text">Pause Spin</span>
+          </button>
+          <button class="btn btn-sm btn-glass" id="btn-reset-cube">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+            <span>Reset Angles</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="cube-viewport-container">
+        <div class="cube-canvas-wrapper" id="cube-drag-area">
+          <div class="cube-scene">
+            <div class="cube" id="interactive-cube">
+              <!-- Front Face: JsProject -->
+              <div class="cube-face face-front" data-target="http://therealbonz.com/JsProject/">
+                <div class="face-content">
+                  <div class="face-tag">AI PLATFORM</div>
+                  <div class="face-icon">⚡</div>
+                  <h3>JsProject</h3>
+                  <p>AI Sales Automation</p>
+                  <span class="face-btn">Launch →</span>
+                </div>
+              </div>
+              <!-- Back Face: Bonz2D -->
+              <div class="cube-face face-back" data-target="https://github.com/therealbonz/Bonz2D">
+                <div class="face-content">
+                  <div class="face-tag">UNITY 2D</div>
+                  <div class="face-icon">🎮</div>
+                  <h3>Bonz2D</h3>
+                  <p>Unity Action Platformer</p>
+                  <span class="face-btn">View Code →</span>
+                </div>
+              </div>
+              <!-- Right Face: 3D Cube Project -->
+              <div class="cube-face face-right" data-target="#3dcube-section">
+                <div class="face-content">
+                  <div class="face-tag">3D STUDIO</div>
+                  <div class="face-icon">🧊</div>
+                  <h3>Cube Project</h3>
+                  <p>Dynamic 3D Wallpaper</p>
+                  <span class="face-btn">Inspect →</span>
+                </div>
+              </div>
+              <!-- Left Face: GitHub Repos -->
+              <div class="cube-face face-left" data-target="#repos-section">
+                <div class="face-content">
+                  <div class="face-tag">ECOSYSTEM</div>
+                  <div class="face-icon">📂</div>
+                  <h3>GitHub Hub</h3>
+                  <p>Active Code Repositories</p>
+                  <span class="face-btn">Explore →</span>
+                </div>
+              </div>
+              <!-- Top Face: Server Storage -->
+              <div class="cube-face face-top" data-target="#server-section">
+                <div class="face-content">
+                  <div class="face-tag">STORAGE</div>
+                  <div class="face-icon">🗄️</div>
+                  <h3>Server Root</h3>
+                  <p>/var/www Manager</p>
+                  <span class="face-btn">Browse →</span>
+                </div>
+              </div>
+              <!-- Bottom Face: therealbonz.com -->
+              <div class="cube-face face-bottom" data-target="#launchpad">
+                <div class="face-content">
+                  <div class="face-tag">COMMAND</div>
+                  <div class="face-icon">💎</div>
+                  <h3>therealbonz</h3>
+                  <p>Home Portal</p>
+                  <span class="face-btn">Top →</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="cube-hint">
+          <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m10 8 4 4-4 4"/></svg>
+          <span>Drag with mouse or swipe touch to rotate the 3D cube • Click any face to jump to project</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Quick Launchpad Section -->
+    <section id="launchpad" class="launchpad-section">
+      <div class="section-header">
+        <div>
+          <span class="section-badge">Instant Access</span>
+          <h2 class="section-title">Project Launchpad</h2>
+          <p class="section-subtitle">Quick launcher for key services, games, and applications hosted on therealbonz.com and GitHub.</p>
+        </div>
+        <button class="btn btn-outline" id="btn-add-project-banner">
+          <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+          <span>Add Custom Card</span>
+        </button>
+      </div>
+
+      <div class="launchpad-grid" id="launchpad-grid">
+        <!-- Project cards rendered dynamically by app.js -->
+        <div class="loading-spinner-wrapper">
+          <div class="spinner"></div>
+          <p>Loading projects...</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- GitHub Repositories Hub -->
+    <section id="repos-section" class="repos-section">
+      <div class="section-header">
+        <div>
+          <span class="section-badge">Version Control</span>
+          <h2 class="section-title">GitHub Repositories</h2>
+          <p class="section-subtitle">Live repository sync from GitHub account <strong class="text-cyan">therealbonz</strong>.</p>
+        </div>
+        <div class="repos-header-actions">
+          <button class="btn btn-glass" id="btn-refresh-repos" title="Refresh repositories from GitHub API">
+            <svg class="icon" id="refresh-icon" viewBox="0 0 24 24"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+            <span>Sync GitHub</span>
+          </button>
+          <button class="btn btn-primary" id="btn-create-repo-action">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+            <span>Create New Repo</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Filter / Search Bar -->
+      <div class="search-filter-bar">
+        <div class="search-input-wrapper">
+          <svg class="search-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="repo-search-input" placeholder="Search repositories by name or description..." autocomplete="off">
+          <button class="clear-search-btn" id="btn-clear-search" style="display:none;">&times;</button>
+        </div>
+
+        <div class="filter-chips" id="repo-language-chips">
+          <button class="filter-chip active" data-lang="all">All</button>
+          <!-- Languages populated dynamically -->
+        </div>
+      </div>
+
+      <!-- Repositories Grid -->
+      <div class="repos-grid" id="repos-grid">
+        <div class="loading-spinner-wrapper">
+          <div class="spinner"></div>
+          <p>Syncing repositories from GitHub...</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Server File & Folder Explorer (CMS) -->
+    <section id="server-section" class="server-section">
+      <div class="section-header">
+        <div>
+          <span class="section-badge">Server CMS</span>
+          <h2 class="section-title">Server Storage &amp; Folders</h2>
+          <p class="section-subtitle">Manage directory trees, inspect deployed files, or create new web roots on the server.</p>
+        </div>
+        <div class="server-header-actions">
+          <button class="btn btn-glass" id="btn-refresh-server-folders">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+            <span>Refresh</span>
+          </button>
+          <button class="btn btn-secondary" id="btn-server-create-folder">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+            <span>New Folder Here</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="server-file-browser">
+        <!-- Breadcrumbs Navigation -->
+        <div class="breadcrumbs-bar" id="server-breadcrumbs">
+          <span class="breadcrumb-item" data-path="">
+            <svg class="icon-inline" viewBox="0 0 24 24"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+            <span id="base-dir-label">/var/www</span>
+          </span>
+        </div>
+
+        <!-- Files & Folders Table / Grid -->
+        <div class="file-list-container" id="server-file-list">
+          <div class="loading-spinner-wrapper">
+            <div class="spinner"></div>
+            <p>Inspecting server folders...</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="site-footer">
+    <div class="footer-content">
+      <div class="footer-brand">
+        <span class="highlight">therealbonz.com</span> • Developed with precision for AI, 3D graphics, games, and web services.
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/therealbonz" target="_blank" rel="noopener">GitHub Profile</a>
+        <a href="http://therealbonz.com/JsProject/" target="_blank" rel="noopener">JsProject</a>
+        <a href="#3dcube-section">3D Cube</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ================= MODALS ================= -->
+
+  <!-- Modal 1: Create GitHub Repository -->
+  <div class="modal-overlay" id="modal-new-repo">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <div class="modal-icon-badge">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/></svg>
+          </div>
+          <div>
+            <h3>Create New GitHub Repository</h3>
+            <p>Will be created under <strong>github.com/therealbonz</strong></p>
+          </div>
+        </div>
+        <button class="modal-close-btn" data-close="modal-new-repo">&times;</button>
+      </div>
+
+      <form id="form-create-repo" class="modal-form">
+        <div class="form-group">
+          <label for="new-repo-name">Repository Name <span class="required">*</span></label>
+          <div class="input-with-prefix">
+            <span class="input-prefix">therealbonz /</span>
+            <input type="text" id="new-repo-name" name="name" required placeholder="my-awesome-app" pattern="^[A-Za-z0-9_.-]+$">
+          </div>
+          <span class="form-hint">Use letters, numbers, hyphens, and periods.</span>
+        </div>
+
+        <div class="form-group">
+          <label for="new-repo-desc">Description <span class="optional">(Optional)</span></label>
+          <textarea id="new-repo-desc" name="description" rows="2" placeholder="Brief explanation of the project..."></textarea>
+        </div>
+
+        <div class="form-row">
+          <div class="toggle-group">
+            <label class="toggle-switch">
+              <input type="checkbox" id="new-repo-private" name="private">
+              <span class="slider"></span>
+            </label>
+            <div class="toggle-label">
+              <strong>Private Repository</strong>
+              <span>Only you will have access</span>
+            </div>
+          </div>
+
+          <div class="toggle-group">
+            <label class="toggle-switch">
+              <input type="checkbox" id="new-repo-autoinit" name="auto_init" checked>
+              <span class="slider"></span>
+            </label>
+            <div class="toggle-label">
+              <strong>Initialize with README</strong>
+              <span>Ready to clone immediately</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn btn-outline" data-close="modal-new-repo">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btn-submit-create-repo">
+            <span class="btn-text">Create Repository</span>
+            <span class="btn-spinner" style="display: none;"></span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal 2: Create Server Folder -->
+  <div class="modal-overlay" id="modal-new-folder">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <div class="modal-icon-badge folder-badge">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          </div>
+          <div>
+            <h3>Create New Server Folder</h3>
+            <p>Target Location: <code id="modal-folder-target-preview">/var/www</code></p>
+          </div>
+        </div>
+        <button class="modal-close-btn" data-close="modal-new-folder">&times;</button>
+      </div>
+
+      <form id="form-create-folder" class="modal-form">
+        <input type="hidden" id="folder-parent-path" name="parent_path" value="">
+
+        <div class="form-group">
+          <label for="new-folder-name">Folder Name <span class="required">*</span></label>
+          <input type="text" id="new-folder-name" name="folder_name" required placeholder="e.g. MyNewWebApp">
+          <span class="form-hint">No slashes or spaces. Safe directory naming will be applied.</span>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn btn-outline" data-close="modal-new-folder">Cancel</button>
+          <button type="submit" class="btn btn-secondary" id="btn-submit-create-folder">
+            <span class="btn-text">Create Folder</span>
+            <span class="btn-spinner" style="display: none;"></span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal 3: Add / Edit CMS Project -->
+  <div class="modal-overlay" id="modal-edit-project">
+    <div class="modal-card modal-lg">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <div class="modal-icon-badge project-badge">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          </div>
+          <div>
+            <h3 id="modal-project-title">Add Launchpad Project</h3>
+            <p>Customize bookmarks and launch cards on your homepage</p>
+          </div>
+        </div>
+        <button class="modal-close-btn" data-close="modal-edit-project">&times;</button>
+      </div>
+
+      <form id="form-edit-project" class="modal-form">
+        <input type="hidden" id="project-edit-id" name="id" value="">
+
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label for="proj-title">Project Title <span class="required">*</span></label>
+            <input type="text" id="proj-title" name="title" required placeholder="e.g. 3D Engine">
+          </div>
+          <div class="form-group">
+            <label for="proj-category">Category</label>
+            <input type="text" id="proj-category" name="category" placeholder="e.g. AI, Games, Graphics">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="proj-subtitle">Subtitle</label>
+          <input type="text" id="proj-subtitle" name="subtitle" placeholder="Short highlight punchline">
+        </div>
+
+        <div class="form-group">
+          <label for="proj-desc">Description</label>
+          <textarea id="proj-desc" name="description" rows="2" placeholder="Full summary of the application..."></textarea>
+        </div>
+
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label for="proj-url">Launch URL <span class="required">*</span></label>
+            <input type="text" id="proj-url" name="url" required placeholder="http://therealbonz.com/my-app/">
+          </div>
+          <div class="form-group">
+            <label for="proj-github">GitHub Repo URL</label>
+            <input type="url" id="proj-github" name="github_url" placeholder="https://github.com/therealbonz/...">
+          </div>
+        </div>
+
+        <div class="form-grid-3">
+          <div class="form-group">
+            <label for="proj-badge">Badge Label</label>
+            <input type="text" id="proj-badge" name="badge" placeholder="e.g. Live Service, Unity 2D">
+          </div>
+          <div class="form-group">
+            <label for="proj-color">Badge Accent</label>
+            <select id="proj-color" name="badge_color">
+              <option value="cyan">Neon Cyan</option>
+              <option value="violet">Electric Violet</option>
+              <option value="emerald">Vibrant Emerald</option>
+              <option value="amber">Warm Amber</option>
+              <option value="rose">Hot Rose</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="proj-priority">Order Priority</label>
+            <input type="number" id="proj-priority" name="priority" value="5" min="1" max="99">
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn btn-outline" data-close="modal-edit-project">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btn-submit-edit-project">
+            <span class="btn-text">Save Project</span>
+            <span class="btn-spinner" style="display: none;"></span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
