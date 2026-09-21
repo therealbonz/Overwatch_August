@@ -133,6 +133,30 @@ async function initAuth() {
     loginForm.addEventListener('submit', handleLogin);
   }
 
+  // Reset password link & form
+  const linkResetModal = document.getElementById('link-open-reset-modal');
+  if (linkResetModal) {
+    linkResetModal.addEventListener('click', (e) => {
+      e.preventDefault();
+      const loginModal = document.getElementById('modal-login');
+      const resetModal = document.getElementById('modal-reset-password');
+      if (loginModal) loginModal.classList.remove('active');
+      if (resetModal) {
+        resetModal.classList.add('active');
+        const loginUser = document.getElementById('login-username');
+        const resetUser = document.getElementById('reset-username');
+        if (loginUser && resetUser && loginUser.value) {
+          resetUser.value = loginUser.value;
+        }
+      }
+    });
+  }
+
+  const resetForm = document.getElementById('form-reset-admin-password');
+  if (resetForm) {
+    resetForm.addEventListener('submit', handleResetPassword);
+  }
+
   // Unlock server view button
   const unlockBtn = document.getElementById('btn-unlock-server-view');
   if (unlockBtn) {
@@ -273,6 +297,65 @@ async function handleLogin(e) {
   }
 }
 
+async function handleResetPassword(e) {
+  e.preventDefault();
+  const submitBtn = document.getElementById('btn-submit-reset-password');
+  const btnText = submitBtn ? submitBtn.querySelector('.btn-text') : null;
+  const spinner = submitBtn ? submitBtn.querySelector('.btn-spinner') : null;
+
+  const username = document.getElementById('reset-username').value.trim();
+  const newPassword = document.getElementById('reset-new-password').value;
+  const confirmPassword = document.getElementById('reset-confirm-password').value;
+
+  if (newPassword !== confirmPassword) {
+    showToast('Passwords do not match.', 'error');
+    return;
+  }
+
+  if (newPassword.length < 6) {
+    showToast('Password must be at least 6 characters long.', 'error');
+    return;
+  }
+
+  if (btnText) btnText.textContent = 'Resetting...';
+  if (spinner) spinner.style.display = 'inline-block';
+  if (submitBtn) submitBtn.disabled = true;
+
+  try {
+    const res = await fetch('/api/auth/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, new_password: newPassword })
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Password reset failed');
+
+    showToast(data.message || 'Password reset successfully! You can now log in.', 'success');
+
+    // Close reset modal and reopen login modal with credentials ready
+    const resetModal = document.getElementById('modal-reset-password');
+    const loginModal = document.getElementById('modal-login');
+    if (resetModal) resetModal.classList.remove('active');
+    if (loginModal) {
+      loginModal.classList.add('active');
+      const loginUser = document.getElementById('login-username');
+      const loginPass = document.getElementById('login-password');
+      if (loginUser) loginUser.value = username;
+      if (loginPass) {
+        loginPass.value = newPassword;
+        loginPass.focus();
+      }
+    }
+  } catch (err) {
+    showToast(`Reset Error: ${err.message}`, 'error');
+  } finally {
+    if (btnText) btnText.textContent = 'Reset Password';
+    if (spinner) spinner.style.display = 'none';
+    if (submitBtn) submitBtn.disabled = false;
+  }
+}
+
 async function handleLogout() {
   try {
     await authFetch('/api/auth/logout', { method: 'POST' });
@@ -350,9 +433,12 @@ async function loadAdminUsersList() {
           </div>
           <span class="admin-user-created">@${escapeHtml(u.username)} • Added: ${escapeHtml(u.created_at || 'Default')}</span>
         </div>
-        ${!u.is_owner ? `
-          <button class="btn-danger-sm" onclick="removeAdminUser('${escapeHtml(u.username)}')">Remove</button>
-        ` : '<span class="text-muted" style="font-size:0.75rem;">Primary</span>'}
+        <div class="admin-user-actions" style="display: flex; gap: 6px; align-items: center;">
+          <button class="btn-outline-sm" onclick="resetAdminUserPassword('${escapeHtml(u.username)}')">Reset Password</button>
+          ${!u.is_owner ? `
+            <button class="btn-danger-sm" onclick="removeAdminUser('${escapeHtml(u.username)}')">Remove</button>
+          ` : '<span class="text-muted" style="font-size:0.75rem;">Primary</span>'}
+        </div>
       </div>
     `).join('');
   } catch (err) {
@@ -383,6 +469,28 @@ async function handleAddAdmin(e) {
     showToast(`Error: ${err.message}`, 'error');
   }
 }
+
+window.resetAdminUserPassword = async function(username) {
+  const newPass = prompt(`Enter new password for admin user '${username}' (minimum 6 characters):`);
+  if (!newPass) return;
+  if (newPass.length < 6) {
+    showToast('Password must be at least 6 characters long.', 'error');
+    return;
+  }
+
+  try {
+    const res = await authFetch(`/api/admin/users/${encodeURIComponent(username)}/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ new_password: newPass })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Failed to reset password');
+    showToast(data.message || `Password reset successfully for ${username}!`, 'success');
+  } catch (err) {
+    showToast(`Error: ${err.message}`, 'error');
+  }
+};
 
 window.removeAdminUser = async function(username) {
   if (!confirm(`Are you sure you want to revoke admin privileges from ${username}?`)) return;

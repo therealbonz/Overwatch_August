@@ -43,14 +43,22 @@ def run_auth_tests():
     assert r_bad_login.status_code == 401
     print("[PASS] Invalid password rejected (401)")
 
-    # Valid login for bonz
-    r_good_login = client.post("/api/auth/login", json={"username": "bonz", "password": "bonzadmin2026"})
+    # Valid login for bonz with new password
+    r_good_login = client.post("/api/auth/login", json={"username": "bonz", "password": "NoStress123!"})
     assert r_good_login.status_code == 200
     auth_resp = r_good_login.json()
     token = auth_resp["token"]
     assert auth_resp["user"]["username"] == "bonz"
     assert auth_resp["user"]["role"] == "superadmin"
     print(f"[PASS] Successfully logged in as bonz [role: {auth_resp['user']['role']}]")
+
+    # Valid login for admin with new password
+    r_admin_login = client.post("/api/auth/login", json={"username": "admin", "password": "NoStress123!"})
+    assert r_admin_login.status_code == 200
+    admin_resp = r_admin_login.json()
+    assert admin_resp["user"]["username"] == "admin"
+    assert admin_resp["user"]["role"] == "superadmin"
+    print("[PASS] Successfully logged in as admin with NoStress123!")
 
     auth_headers = {"Authorization": f"Bearer {token}"}
 
@@ -65,6 +73,7 @@ def run_auth_tests():
     assert r_users.status_code == 200
     users_list = [u["username"] for u in r_users.json()["users"]]
     assert "bonz" in users_list
+    assert "admin" in users_list
     print(f"[PASS] Superadmin can list admins: {users_list}")
 
     # Add secondary admin
@@ -78,27 +87,41 @@ def run_auth_tests():
     assert r_add_admin.status_code == 200
     print("[PASS] Superadmin bonz successfully added secondary admin 'leaddev'")
 
-    # Test login as secondary admin
-    r_lead_login = client.post("/api/auth/login", json={"username": "leaddev", "password": "devpassword123"})
+    # Superadmin resets password for secondary admin
+    r_reset_admin = client.post("/api/admin/users/leaddev/reset-password", json={"new_password": "NewDevPass456!"}, headers=auth_headers)
+    assert r_reset_admin.status_code == 200
+    print("[PASS] Superadmin successfully reset password for 'leaddev'")
+
+    # Test login with newly reset password
+    r_lead_login = client.post("/api/auth/login", json={"username": "leaddev", "password": "NewDevPass456!"})
     assert r_lead_login.status_code == 200
     lead_token = r_lead_login.json()["token"]
     lead_headers = {"Authorization": f"Bearer {lead_token}"}
-    print("[PASS] Secondary admin 'leaddev' can log in successfully")
+    print("[PASS] Secondary admin 'leaddev' can log in with reset password")
 
     # Secondary admin CANNOT add other admins (only superadmin bonz can)
     r_forbidden_add = client.post("/api/admin/users", json={"username": "attacker", "password": "123"}, headers=lead_headers)
     assert r_forbidden_add.status_code == 403
     print("[PASS] Secondary admin cannot add other admins (403 Forbidden)")
 
+    # Public/Whitelisted IP Password Reset Endpoint
+    r_reset_public = client.post("/api/auth/reset-password", json={"username": "leaddev", "new_password": "AnotherDevPass789!"})
+    assert r_reset_public.status_code == 200
+    r_lead_login2 = client.post("/api/auth/login", json={"username": "leaddev", "password": "AnotherDevPass789!"})
+    assert r_lead_login2.status_code == 200
+    print("[PASS] Whitelisted client successfully reset password via /api/auth/reset-password")
+
     # Delete secondary admin
     r_del_admin = client.delete("/api/admin/users/leaddev", headers=auth_headers)
     assert r_del_admin.status_code == 200
     print("[PASS] Superadmin bonz successfully deleted secondary admin 'leaddev'")
 
-    # Primary owner bonz cannot be deleted
-    r_del_owner = client.delete("/api/admin/users/bonz", headers=auth_headers)
-    assert r_del_owner.status_code == 400
-    print("[PASS] Deletion of primary owner 'bonz' safely prevented (400 Bad Request)")
+    # Primary owner bonz and admin cannot be deleted
+    r_del_bonz = client.delete("/api/admin/users/bonz", headers=auth_headers)
+    assert r_del_bonz.status_code == 400
+    r_del_admin_super = client.delete("/api/admin/users/admin", headers=auth_headers)
+    assert r_del_admin_super.status_code == 400
+    print("[PASS] Deletion of primary accounts 'bonz' and 'admin' safely prevented (400 Bad Request)")
 
     print("\n--- 4. Testing IP Whitelist Security Settings ---")
     r_sec = client.get("/api/admin/security", headers=auth_headers)

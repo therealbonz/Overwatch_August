@@ -4,9 +4,19 @@
       "username": "bonz",
       "display_name": "Bonz (Superadmin)",
       "role": "superadmin",
-      "password_hash": "6791567a550f48eba5b9eb5bf088ca1c$85d6490a9ca7e3a4dd2e0662729a4270055f09e7e275f7d55833972001e96e81",
+      "password_hash": "0ed13a768845fc9b6e8ee6ba3ebd03b7$010c02990efcd68afa106b14904382cbb8b4fdc92d23068e2eb7affb5939e520",
       "created_at": "2026-09-08 07:30:16",
-      "can_add_admins": true
+      "can_add_admins": true,
+      "updated_at": "2026-09-21 12:28:23"
+    },
+    {
+      "username": "admin",
+      "display_name": "Admin (Superadmin)",
+      "role": "superadmin",
+      "password_hash": "66e508e7bf058218eb95f914249e81c4$81c6efaea7c83df005c7dbcbd9026685eac3bf45b1f89f1c119e9f4f75fd7a67",
+      "created_at": "2026-09-21 12:25:44",
+      "can_add_admins": true,
+      "updated_at": "2026-09-21 12:28:23"
     }
   ],
   "security": {

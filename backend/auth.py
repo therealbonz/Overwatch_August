@@ -61,8 +61,8 @@ def init_auth_data() -> Dict[str, Any]:
         except Exception:
             pass
 
-    # Default initial password for bonz: 'bonzadmin2026'
-    initial_password = "bonzadmin2026"
+    # Default initial password for admin/bonz: 'NoStress123!'
+    initial_password = "NoStress123!"
     password_hash = hash_password(initial_password)
 
     default_data = {
@@ -70,6 +70,14 @@ def init_auth_data() -> Dict[str, Any]:
             {
                 "username": "bonz",
                 "display_name": "Bonz (Superadmin)",
+                "role": "superadmin",
+                "password_hash": password_hash,
+                "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "can_add_admins": True
+            },
+            {
+                "username": "admin",
+                "display_name": "Admin (Superadmin)",
                 "role": "superadmin",
                 "password_hash": password_hash,
                 "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -95,6 +103,48 @@ def init_auth_data() -> Dict[str, Any]:
 
 def save_auth_data(data: Dict[str, Any]):
     AUTH_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def reset_user_password(username: str, new_password: str, role: Optional[str] = None) -> Dict[str, Any]:
+    """Resets the password for a given username (or creates user if it doesn't exist).
+    Invalidates any active sessions for that user."""
+    global active_sessions
+    data = init_auth_data()
+    users = data.get("users", [])
+    clean_user = username.strip().lower()
+    target = None
+    for u in users:
+        if u.get("username", "").strip().lower() == clean_user:
+            target = u
+            break
+
+    new_hash = hash_password(new_password)
+    if target:
+        target["password_hash"] = new_hash
+        target["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        is_super = clean_user in ("admin", "bonz")
+        new_user = {
+            "username": clean_user,
+            "display_name": f"{clean_user.capitalize()} (Superadmin)" if is_super else clean_user.capitalize(),
+            "role": role or ("superadmin" if is_super else "admin"),
+            "password_hash": new_hash,
+            "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "can_add_admins": is_super
+        }
+        users.append(new_user)
+        target = new_user
+
+    data["users"] = users
+    save_auth_data(data)
+
+    tokens_to_remove = [tok for tok, sess in active_sessions.items() if sess.get("username", "").strip().lower() == clean_user]
+    for tok in tokens_to_remove:
+        del active_sessions[tok]
+    if tokens_to_remove:
+        save_sessions()
+
+    return target
 
 
 def load_sessions():

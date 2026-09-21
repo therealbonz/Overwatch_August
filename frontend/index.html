@@ -354,21 +354,67 @@
           <span id="login-ip-text">Checking client IP...</span>
         </div>
 
-        <div class="form-group">
+          <div class="form-group">
           <label for="login-username">Admin Username</label>
-          <input type="text" id="login-username" name="username" required value="bonz" autocomplete="username">
+          <input type="text" id="login-username" name="username" required value="admin" autocomplete="username" placeholder="admin or bonz">
         </div>
 
         <div class="form-group">
-          <label for="login-password">Password</label>
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <label for="login-password">Password</label>
+            <a href="#" id="link-open-reset-modal" style="font-size: 0.8rem; color: #38bdf8; text-decoration: underline; cursor: pointer;">Reset Password?</a>
+          </div>
           <input type="password" id="login-password" name="password" required placeholder="••••••••••••" autocomplete="current-password">
-          <span class="form-hint">Initial default setup password: <code>bonzadmin2026</code></span>
+          <span class="form-hint">Default setup password: <code>NoStress123!</code></span>
         </div>
 
         <div class="modal-actions">
           <button type="button" class="btn btn-outline" data-close="modal-login">Cancel</button>
           <button type="submit" class="btn btn-primary" id="btn-submit-login">
             <span class="btn-text">Sign In as Admin</span>
+            <span class="btn-spinner" style="display: none;"></span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Reset Password (Whitelist Protected) -->
+  <div class="modal-overlay" id="modal-reset-password">
+    <div class="modal-card modal-sm">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <div class="modal-icon-badge folder-badge">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <div>
+            <h3>Reset Admin Password</h3>
+            <p>Direct reset for authorized/whitelisted IPs</p>
+          </div>
+        </div>
+        <button class="modal-close-btn" data-close="modal-reset-password">&times;</button>
+      </div>
+
+      <form id="form-reset-admin-password" class="modal-form">
+        <div class="form-group">
+          <label for="reset-username">Admin Username <span class="required">*</span></label>
+          <input type="text" id="reset-username" name="username" required value="admin" autocomplete="username">
+        </div>
+
+        <div class="form-group">
+          <label for="reset-new-password">New Password <span class="required">*</span></label>
+          <input type="password" id="reset-new-password" name="new_password" required minlength="6" placeholder="Min 6 characters" autocomplete="new-password">
+        </div>
+
+        <div class="form-group">
+          <label for="reset-confirm-password">Confirm Password <span class="required">*</span></label>
+          <input type="password" id="reset-confirm-password" required minlength="6" placeholder="Re-enter new password" autocomplete="new-password">
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn btn-outline" data-close="modal-reset-password">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btn-submit-reset-password">
+            <span class="btn-text">Reset Password</span>
             <span class="btn-spinner" style="display: none;"></span>
           </button>
         </div>

@@ -34,7 +34,7 @@ def run_tests():
     print(f"[PASS] CMS projects API returned {len(projects)} projects: {titles}")
 
     # Log in as bonz
-    r_login = client.post("/api/auth/login", json={"username": "bonz", "password": "bonzadmin2026"})
+    r_login = client.post("/api/auth/login", json={"username": "bonz", "password": "NoStress123!"})
     assert r_login.status_code == 200
     token = r_login.json()["token"]
     auth_headers = {"Authorization": f"Bearer {token}"}

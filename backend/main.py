@@ -35,7 +35,8 @@ try:
         verify_password,
         init_auth_data,
         save_auth_data,
-        get_token_from_request
+        get_token_from_request,
+        reset_user_password
     )
 except ImportError:
     from auth import (
@@ -50,7 +51,8 @@ except ImportError:
         verify_password,
         init_auth_data,
         save_auth_data,
-        get_token_from_request
+        get_token_from_request,
+        reset_user_password
     )
 
 # Load environment variables if .env exists
@@ -64,12 +66,14 @@ FRONTEND_DIR = PROJECT_ROOT / "frontend"
 CMS_FILE = BASE_DIR / "cms_data.json"
 
 # Server Base Directory for folder creation and browsing
-if os.name == "nt":
-    DEFAULT_SERVER_DIR = str(PROJECT_ROOT.parent)
-else:
+if os.environ.get("SERVER_BASE_DIR"):
+    DEFAULT_SERVER_DIR = os.environ["SERVER_BASE_DIR"]
+elif Path("/var/www").exists():
     DEFAULT_SERVER_DIR = "/var/www"
+else:
+    DEFAULT_SERVER_DIR = str(PROJECT_ROOT.parent)
 
-SERVER_BASE_DIR = Path(os.environ.get("SERVER_BASE_DIR", DEFAULT_SERVER_DIR)).resolve()
+SERVER_BASE_DIR = Path(DEFAULT_SERVER_DIR).resolve()
 GITHUB_USER = os.environ.get("GITHUB_USER", "therealbonz")
 
 app = FastAPI(
@@ -160,6 +164,15 @@ class LoginRequest(BaseModel):
 
 class ChangePasswordRequest(BaseModel):
     current_password: str
+    new_password: str = Field(..., min_length=6)
+
+
+class ResetPasswordRequest(BaseModel):
+    username: str = Field(..., min_length=1, max_length=50)
+    new_password: str = Field(..., min_length=6)
+
+
+class AdminResetPasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=6)
 
 
@@ -308,6 +321,25 @@ async def change_password(payload: ChangePasswordRequest, admin: Dict[str, Any] 
     raise HTTPException(status_code=404, detail="User not found.")
 
 
+@app.post("/api/auth/reset-password")
+async def reset_password_public(payload: ResetPasswordRequest, request: Request):
+    """Resets an admin user's password. Requires the client to originate from an authorized/trusted IP."""
+    client_ip = get_client_ip(request)
+    if not is_ip_trusted(client_ip):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Access Denied: Password reset is restricted to authorized IPs. Your IP ({client_ip}) is not on the whitelist."
+        )
+
+    clean_user = payload.username.strip().lower()
+    user = reset_user_password(clean_user, payload.new_password)
+    return {
+        "success": True,
+        "message": f"Password reset successfully for user '{user['username']}'. You can now log in.",
+        "username": user["username"]
+    }
+
+
 # ---------------------------------------------------------
 # Admin User & Security Management (Superadmin: bonz only)
 # ---------------------------------------------------------
@@ -323,7 +355,7 @@ async def list_admin_users(superadmin: Dict[str, Any] = Depends(require_superadm
             "display_name": u.get("display_name"),
             "role": u.get("role", "admin"),
             "created_at": u.get("created_at"),
-            "is_owner": u.get("username").lower() == "bonz"
+            "is_owner": u.get("username").lower() in ("bonz", "admin") or u.get("role") == "superadmin"
         })
     return {"users": sanitized}
 
@@ -364,11 +396,27 @@ async def add_admin_user(payload: AddAdminRequest, superadmin: Dict[str, Any] = 
     }
 
 
+@app.post("/api/admin/users/{username}/reset-password")
+async def admin_reset_user_password(
+    username: str,
+    payload: AdminResetPasswordRequest,
+    superadmin: Dict[str, Any] = Depends(require_superadmin)
+):
+    """Allows superadmin to reset any admin user's password without knowing old password."""
+    clean_user = username.strip().lower()
+    user = reset_user_password(clean_user, payload.new_password)
+    return {
+        "success": True,
+        "message": f"Password for user '{user['username']}' reset successfully.",
+        "username": user["username"]
+    }
+
+
 @app.delete("/api/admin/users/{username}")
 async def remove_admin_user(username: str, superadmin: Dict[str, Any] = Depends(require_superadmin)):
-    """Removes an admin user. Primary owner bonz cannot be removed."""
-    if username.lower() == "bonz":
-        raise HTTPException(status_code=400, detail="Cannot delete primary superadmin account 'bonz'.")
+    """Removes an admin user. Primary owner accounts (bonz, admin) cannot be removed."""
+    if username.lower() in ("bonz", "admin"):
+        raise HTTPException(status_code=400, detail=f"Cannot delete primary superadmin account '{username}'.")
 
     auth_data = init_auth_data()
     users = auth_data.get("users", [])
