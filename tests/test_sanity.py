@@ -31,6 +31,7 @@ def run_tests():
     assert "3D Cube Project" in titles
     assert "JsProject" in titles
     assert "Bonz2D Game" in titles
+    assert "Pi Control Hub" in titles
     print(f"[PASS] CMS projects API returned {len(projects)} projects: {titles}")
 
     # Log in as bonz

@@ -15,6 +15,20 @@
       "priority": 1
     },
     {
+      "id": "pihub",
+      "title": "Pi Control Hub",
+      "subtitle": "Raspberry Pi 5 Local Command Center",
+      "description": "Unified hardware telemetry, power controls, service manager, remote web terminal, and PC Wake-on-LAN dashboard.",
+      "url": "http://10.0.0.120/",
+      "github_url": null,
+      "badge": "Hardware Hub",
+      "badge_color": "rose",
+      "category": "Hardware & IoT",
+      "icon": "cpu",
+      "featured": true,
+      "priority": 2
+    },
+    {
       "id": "3dcubeproject",
       "title": "3D Cube Project",
       "subtitle": "Interactive 3D Engine & Reactive Wallpaper",
@@ -26,7 +40,7 @@
       "category": "3D & Graphics",
       "icon": "box",
       "featured": true,
-      "priority": 2
+      "priority": 3
     },
     {
       "id": "bonz2d",
@@ -40,7 +54,7 @@
       "category": "Game Dev",
       "icon": "gamepad",
       "featured": true,
-      "priority": 3
+      "priority": 4
     },
     {
       "id": "gallery_suite",
@@ -54,7 +68,7 @@
       "category": "Ecosystem",
       "icon": "images",
       "featured": true,
-      "priority": 4
+      "priority": 5
     }
   ]
 }
