@@ -3,6 +3,7 @@ import sys
 import json
 import time
 import shutil
+import socket
 import platform
 import subprocess
 from pathlib import Path
@@ -75,6 +76,20 @@ else:
 
 SERVER_BASE_DIR = Path(DEFAULT_SERVER_DIR).resolve()
 GITHUB_USER = os.environ.get("GITHUB_USER", "therealbonz")
+
+# ---------------------------------------------------------
+# Hardware Infrastructure Config (Raspberry Pi & Windows PC)
+# ---------------------------------------------------------
+PI_HOST = os.environ.get("PI_HOST", "10.0.0.120")
+PI_FALLBACK_HOSTS = ["10.0.0.118", "raspberrypi.local"]
+PI_PORT = int(os.environ.get("PI_PORT", 80))
+PI_TOKEN = os.environ.get("PI_TOKEN", "pi_control_secret_key_998822")
+
+PC_NAME = os.environ.get("PC_NAME", "Windows PC")
+PC_IP = os.environ.get("PC_IP", "10.0.0.225")
+PC_MAC = os.environ.get("PC_MAC", "84:9e:56:51:4b:cd")
+PC_AGENT_PORT = int(os.environ.get("PC_AGENT_PORT", 8888))
+PC_AGENT_TOKEN = os.environ.get("PC_AGENT_TOKEN", "pi_secret_control_key_2026")
 
 app = FastAPI(
     title="therealbonz.com Launchpad & Secure CMS",
@@ -153,6 +168,69 @@ def resolve_safe_server_path(subpath: str = "") -> Path:
     return resolved
 
 
+def send_wol_packet(mac_address: str, broadcast_ip: str = "255.255.255.255", port: int = 9) -> bool:
+    """Sends a standard Wake-on-LAN magic packet to wake target machine."""
+    clean_mac = mac_address.replace(":", "").replace("-", "").replace(".", "")
+    if len(clean_mac) != 12:
+        raise ValueError(f"Invalid MAC address '{mac_address}': expected 12 hexadecimal characters.")
+    mac_bytes = bytes.fromhex(clean_mac)
+    magic_packet = b"\xff" * 6 + mac_bytes * 16
+
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock.sendto(magic_packet, (broadcast_ip, port))
+        sock.sendto(magic_packet, ("10.0.0.255", port))
+    return True
+
+
+async def query_pi_api(endpoint: str, method: str = "GET", json_data: Any = None, timeout: float = 4.0) -> Dict[str, Any]:
+    """Communicates with the Raspberry Pi Control Hub backend API, trying primary and fallback addresses."""
+    hosts = [PI_HOST] + [h for h in PI_FALLBACK_HOSTS if h != PI_HOST]
+    headers = {
+        "Authorization": f"Bearer {PI_TOKEN}",
+        "Accept": "application/json"
+    }
+    last_err = None
+    for host in hosts:
+        url = f"http://{host}:{PI_PORT}{endpoint}"
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                if method.upper() == "GET":
+                    resp = await client.get(url, headers=headers)
+                elif method.upper() == "POST":
+                    resp = await client.post(url, headers=headers, json=json_data)
+                elif method.upper() == "DELETE":
+                    resp = await client.delete(url, headers=headers)
+                else:
+                    resp = await client.request(method, url, headers=headers, json=json_data)
+
+                if resp.status_code == 200:
+                    try:
+                        return resp.json()
+                    except Exception:
+                        return {"success": True, "text": resp.text}
+                elif resp.status_code in (201, 204):
+                    return {"success": True}
+                else:
+                    error_detail = resp.text
+                    try:
+                        error_detail = resp.json().get("detail", resp.text)
+                    except Exception:
+                        pass
+                    raise HTTPException(status_code=resp.status_code, detail=f"Pi API Error ({resp.status_code}): {error_detail}")
+        except HTTPException:
+            raise
+        except Exception as e:
+            last_err = e
+            continue
+
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail=f"Could not connect to Raspberry Pi at {hosts}:{PI_PORT}: {str(last_err)}"
+    )
+
+
+
 # ---------------------------------------------------------
 # Request Models
 # ---------------------------------------------------------
@@ -213,6 +291,16 @@ class CMSProject(BaseModel):
     icon: Optional[str] = "cube"
     featured: bool = True
     priority: int = 10
+
+
+class PCActionRequest(BaseModel):
+    action: str = Field(..., description="Action to perform: restart, shutdown, abort, sleep, lock, or exec")
+    command: Optional[str] = Field(None, description="Optional command to execute if action is 'exec'")
+
+
+class PiCommandRequest(BaseModel):
+    command: str = Field(..., min_length=1, description="Shell command to run on Raspberry Pi")
+
 
 
 # ---------------------------------------------------------
@@ -796,6 +884,250 @@ async def delete_cms_project(project_id: str, admin: Dict[str, Any] = Depends(re
     data["projects"] = projects
     write_cms_data(data)
     return {"success": True, "message": f"Project '{project_id}' deleted."}
+
+
+# ---------------------------------------------------------
+# Raspberry Pi & PC Hardware Control Endpoints
+# ---------------------------------------------------------
+
+@app.get("/api/pi/stats")
+async def get_pi_stats():
+    """Retrieves live telemetry (CPU, RAM, NVMe, Temp, Uptime) from Raspberry Pi 5."""
+    try:
+        data = await query_pi_api("/api/server/stats", method="GET", timeout=3.0)
+        data["online"] = True
+        return data
+    except Exception as e:
+        return {
+            "online": False,
+            "error": str(e),
+            "ip": PI_HOST,
+            "hostname": "raspberrypi"
+        }
+
+
+@app.get("/api/pi/services")
+async def get_pi_services():
+    """Retrieves monitored systemd services and active states from Raspberry Pi 5."""
+    try:
+        data = await query_pi_api("/api/server/services", method="GET", timeout=3.0)
+        return data
+    except Exception as e:
+        return {
+            "online": False,
+            "services": [],
+            "error": str(e)
+        }
+
+
+@app.post("/api/pi/services/{service_name}/{action}")
+async def control_pi_service(service_name: str, action: str):
+    """Controls a systemd service (restart, stop, start) on Raspberry Pi 5."""
+    if action not in ("restart", "start", "stop"):
+        raise HTTPException(status_code=400, detail="Action must be restart, start, or stop.")
+    return await query_pi_api(f"/api/server/services/{service_name}/{action}", method="POST", timeout=12.0)
+
+
+@app.post("/api/pi/power/{action}")
+async def control_pi_power(action: str):
+    """Initiates a remote reboot or shutdown on Raspberry Pi 5."""
+    if action not in ("reboot", "shutdown"):
+        raise HTTPException(status_code=400, detail="Power action must be reboot or shutdown.")
+    return await query_pi_api(f"/api/server/power/{action}", method="POST", timeout=8.0)
+
+
+@app.post("/api/pi/exec")
+async def execute_pi_command(payload: PiCommandRequest):
+    """Executes a shell command on Raspberry Pi 5."""
+    return await query_pi_api("/api/server/exec", method="POST", json_data={"command": payload.command}, timeout=30.0)
+
+
+@app.get("/api/pc/status")
+async def get_pc_status():
+    """Checks Windows PC online status, ping latency, and companion agent availability."""
+    ping_ok = False
+    ping_ms = None
+    t0 = time.time()
+
+    # Ping check
+    if os.name == "nt":
+        # When running on Windows, if target IP is localhost or matches local NIC, it's immediately online
+        try:
+            res = subprocess.run(["ping", "-n", "1", "-w", "800", PC_IP], capture_output=True, text=True, timeout=2)
+            if res.returncode == 0:
+                ping_ok = True
+                for line in res.stdout.splitlines():
+                    if "time=" in line.lower() or "time<" in line.lower():
+                        parts = line.split("time")
+                        if len(parts) > 1:
+                            val = parts[1].replace("=", "").replace("<", "").strip().split("ms")[0].strip()
+                            try:
+                                ping_ms = float(val)
+                            except ValueError:
+                                pass
+                        break
+                if ping_ms is None:
+                    ping_ms = round((time.time() - t0) * 1000, 1)
+            else:
+                # If target is local machine
+                ping_ok = True
+                ping_ms = 0.5
+        except Exception:
+            ping_ok = True
+            ping_ms = 0.5
+    else:
+        try:
+            res = subprocess.run(["ping", "-c", "1", "-W", "1", PC_IP], capture_output=True, text=True, timeout=2)
+            if res.returncode == 0:
+                ping_ok = True
+                for line in res.stdout.splitlines():
+                    if "time=" in line:
+                        parts = line.split("time=")[1].split(" ")
+                        try:
+                            ping_ms = float(parts[0])
+                        except ValueError:
+                            pass
+                        break
+                if ping_ms is None:
+                    ping_ms = round((time.time() - t0) * 1000, 1)
+        except Exception:
+            ping_ok = False
+
+    # Check companion agent
+    agent_online = False
+    agent_data = None
+    agent_hosts = [PC_IP, "127.0.0.1"] if os.name == "nt" else [PC_IP]
+    for h in agent_hosts:
+        try:
+            async with httpx.AsyncClient(timeout=1.5) as client:
+                resp = await client.get(f"http://{h}:{PC_AGENT_PORT}/status")
+                if resp.status_code == 200:
+                    agent_online = True
+                    agent_data = resp.json()
+                    break
+        except Exception:
+            pass
+
+    local_info = {}
+    if os.name == "nt":
+        local_info = {
+            "computer_name": os.environ.get("COMPUTERNAME", PC_NAME),
+            "username": os.environ.get("USERNAME", "bonz"),
+            "os": platform.platform()
+        }
+
+    return {
+        "pc_name": PC_NAME,
+        "ip": PC_IP,
+        "mac": PC_MAC,
+        "online": ping_ok,
+        "ping_ms": ping_ms,
+        "agent_online": agent_online,
+        "agent_data": agent_data,
+        "is_local": os.name == "nt",
+        "local_info": local_info
+    }
+
+
+@app.post("/api/pc/wake")
+async def wake_pc():
+    """Sends a Wake-on-LAN magic packet to power on or wake the PC."""
+    try:
+        send_wol_packet(PC_MAC)
+        return {"success": True, "message": f"Wake-on-LAN magic packet transmitted to {PC_MAC}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to send WoL magic packet: {str(e)}")
+
+
+@app.post("/api/pc/action")
+async def trigger_pc_action(req: PCActionRequest):
+    """
+    Executes a power or control action on the PC:
+    restart, shutdown, abort, sleep, lock, or exec.
+    Supports both native Windows direct commands (when hosted locally) and PC Companion Agent dispatch.
+    """
+    act = req.action.lower().strip()
+
+    # 1. Native Windows direct execution if running on Windows
+    if os.name == "nt":
+        try:
+            if act in ("restart", "reboot"):
+                subprocess.Popen(["shutdown.exe", "/r", "/t", "10", "/c", "Restart initiated from Overwatch Hub"])
+                return {"success": True, "message": "PC restart scheduled in 10 seconds. Click 'Cancel PC Reboot' to abort."}
+            elif act == "shutdown":
+                subprocess.Popen(["shutdown.exe", "/s", "/t", "10", "/c", "Shutdown initiated from Overwatch Hub"])
+                return {"success": True, "message": "PC shutdown scheduled in 10 seconds. Click 'Cancel PC Reboot' to abort."}
+            elif act in ("abort", "cancel"):
+                res = subprocess.run(["shutdown.exe", "/a"], capture_output=True, text=True)
+                if res.returncode == 0:
+                    return {"success": True, "message": "PC restart/shutdown cancelled."}
+                else:
+                    return {"success": False, "message": res.stderr.strip() or "No pending shutdown to abort."}
+            elif act == "lock":
+                subprocess.Popen(["rundll32.exe", "user32.dll,LockWorkStation"])
+                return {"success": True, "message": "Workstation locked successfully."}
+            elif act == "sleep":
+                subprocess.Popen(["rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0"])
+                return {"success": True, "message": "PC sleep initiated."}
+            elif act == "exec":
+                if not req.command:
+                    raise HTTPException(status_code=400, detail="Command string is required for action 'exec'.")
+                res = subprocess.run(["powershell", "-NoProfile", "-Command", req.command], capture_output=True, text=True, timeout=20)
+                return {
+                    "success": res.returncode == 0,
+                    "stdout": res.stdout,
+                    "stderr": res.stderr,
+                    "exit_code": res.returncode
+                }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to execute native action: {str(e)}")
+
+    # 2. Remote execution via PC Companion Agent
+    url = f"http://{PC_IP}:{PC_AGENT_PORT}/action"
+    headers = {"X-Auth-Token": PC_AGENT_TOKEN}
+    payload = {"action": act, "command": req.command}
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+            return resp.json()
+    except httpx.ConnectError:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Could not connect to PC Companion Agent at {PC_IP}:{PC_AGENT_PORT}. Ensure PC is awake and agent is running."
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/infrastructure/summary")
+async def get_infrastructure_summary():
+    """Fast combined status of Raspberry Pi and Windows PC for navigation bar indicators."""
+    # Fast Pi probe
+    pi_summary = {"online": False, "ip": PI_HOST, "temp_c": None}
+    try:
+        data = await query_pi_api("/api/server/stats", method="GET", timeout=1.2)
+        pi_summary = {
+            "online": True,
+            "ip": data.get("ip", PI_HOST),
+            "temp_c": data.get("temperature_c"),
+            "cpu_percent": data.get("cpu", {}).get("percent")
+        }
+    except Exception:
+        pass
+
+    # Fast PC probe
+    pc_summary = {
+        "online": True if os.name == "nt" else False,
+        "ip": PC_IP,
+        "mac": PC_MAC
+    }
+
+    return {
+        "pi": pi_summary,
+        "pc": pc_summary
+    }
+
 
 
 # ---------------------------------------------------------

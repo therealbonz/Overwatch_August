@@ -22,6 +22,17 @@ A high-performance, dark-themed developer portal and Content Management System f
   - Create new project directories and web roots directly from the browser.
 - **Customizable Launchpad Cards (CMS)**:
   - Add, edit, or remove custom project bookmarks and external links.
+- **Raspberry Pi 5 & Windows PC Control Hub**:
+  - Remote power management: **Reboot Pi**, **Shutdown Pi**, **Reboot PC** (with 10-second cancel window), **Shutdown PC**, **Sleep PC**, and **Lock Workstation**.
+  - **Wake-on-LAN (WoL)**: Transmit magic packet to PC MAC `84:9e:56:51:4b:cd`.
+  - **Live Hardware Telemetry**: Real-time Raspberry Pi 5 CPU load, 16GB RAM utilization, NVMe storage usage, and BCM2712 SoC thermal temperature.
+  - **Systemd Services Manager**: Live status and one-click restart/stop/start for `pi-dashboard`, `wayvnc`, `ssh`, `docker`, and `vsftpd`.
+  - **Interactive Remote Command Runners**: Run shell commands on the Pi or PowerShell on Windows with instant terminal output.
+  - Quick browser launcher links to Pi Control Hub (`http://10.0.0.120/`) and noVNC Remote Desktop (`http://10.0.0.120:6080/`).
+- **Antigravity Overwatch VNC Bridge & Desktop Controller**:
+  - Real-time VNC screen streaming (RFB port 5900 + Web VNC port 5901).
+  - Native Windows desktop app with live screen preview and dedicated **Pi & PC Control** tab.
+  - Antigravity VNC Plugin with MCP tools and skills.
 
 ---
 

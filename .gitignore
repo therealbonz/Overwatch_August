@@ -20,3 +20,15 @@ backend/sessions.json
 # OS
 Thumbs.db
 .DS_Store
+
+# Screenshots & Temporary Captures
+*.png
+antigravity-vnc-bridge/latest_screen_capture.png
+
+# Android & Gradle Build Artifacts
+android-app/.gradle/
+android-app/.kotlin/
+android-app/build/
+android-app/*/build/
+android-app/local.properties
+

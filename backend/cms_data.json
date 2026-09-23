@@ -67,8 +67,21 @@
       "badge_color": "amber",
       "category": "Ecosystem",
       "icon": "images",
-      "featured": true,
       "priority": 5
+    },
+    {
+      "id": "pi_novnc",
+      "title": "Remote Desktop (noVNC)",
+      "subtitle": "HTML5 Web Remote Desktop & VNC Client",
+      "description": "Browser-native high-performance graphical desktop connection directly to Raspberry Pi 5 wayvnc / noVNC on port 6080.",
+      "url": "http://10.0.0.120:6080/",
+      "github_url": "http://10.0.0.120:6080/",
+      "badge": "VNC 6080",
+      "badge_color": "cyan",
+      "category": "Remote Desktop",
+      "icon": "display",
+      "featured": true,
+      "priority": 6
     }
   ]
 }

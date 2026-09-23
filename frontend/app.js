@@ -26,7 +26,14 @@ const state = {
   isDragging: false,
   lastMouseX: 0,
   lastMouseY: 0,
-  animationFrameId: null
+  animationFrameId: null,
+
+  // Infrastructure state
+  piData: null,
+  pcData: null,
+  services: [],
+  pcRebootCountdown: null,
+  pcRebootInterval: null
 };
 
 // Language color palette
@@ -64,6 +71,7 @@ async function authFetch(url, options = {}) {
 document.addEventListener('DOMContentLoaded', async () => {
   await initAuth();
   initSystemStatus();
+  initPiHub();
   init3DCube();
   initProjectsCMS();
   initGitHubRepos();
@@ -1363,3 +1371,521 @@ function initModals() {
     }
   });
 }
+
+// ==========================================================================
+// Raspberry Pi 5 & Windows PC Control Hub
+// ==========================================================================
+
+function initPiHub() {
+  const btnRebootPi = document.getElementById('btn-action-reboot-pi');
+  const btnShutdownPi = document.getElementById('btn-action-shutdown-pi');
+  const btnRebootPC = document.getElementById('btn-action-reboot-pc');
+  const btnShutdownPC = document.getElementById('btn-action-shutdown-pc');
+  const btnAbortPC = document.getElementById('btn-action-abort-pc');
+  const btnWakePC = document.getElementById('btn-action-wake-pc');
+  const btnLockPC = document.getElementById('btn-action-lock-pc');
+  const btnSleepPC = document.getElementById('btn-action-sleep-pc');
+  const btnRefreshHub = document.getElementById('btn-refresh-pi-hub');
+  const btnRefreshServices = document.getElementById('btn-refresh-services');
+  const formPiCmd = document.getElementById('form-pi-cmd');
+  const formPCCmd = document.getElementById('form-pc-cmd');
+
+  if (btnRebootPi) btnRebootPi.addEventListener('click', rebootPiUI);
+  if (btnShutdownPi) btnShutdownPi.addEventListener('click', shutdownPiUI);
+  if (btnRebootPC) btnRebootPC.addEventListener('click', () => triggerPCActionUI('restart'));
+  if (btnShutdownPC) btnShutdownPC.addEventListener('click', () => triggerPCActionUI('shutdown'));
+  if (btnAbortPC) btnAbortPC.addEventListener('click', abortPCActionUI);
+  if (btnWakePC) btnWakePC.addEventListener('click', wakePCUI);
+  if (btnLockPC) btnLockPC.addEventListener('click', () => triggerPCActionUI('lock'));
+  if (btnSleepPC) btnSleepPC.addEventListener('click', () => triggerPCActionUI('sleep'));
+  if (btnRefreshHub) btnRefreshHub.addEventListener('click', () => {
+    refreshPiHub();
+    showToast('Refreshing hardware telemetry...', 'info');
+  });
+  if (btnRefreshServices) btnRefreshServices.addEventListener('click', () => {
+    loadPiServices();
+    showToast('Refreshing Pi systemd services...', 'info');
+  });
+  if (formPiCmd) formPiCmd.addEventListener('submit', handlePiCommand);
+  if (formPCCmd) formPCCmd.addEventListener('submit', handlePCCommand);
+
+  // Initial load
+  loadPiStats();
+  loadPiServices();
+  loadPCStatus();
+
+  // Periodic polling every 6 seconds
+  setInterval(() => {
+    loadPiStats();
+    loadPCStatus();
+  }, 6000);
+}
+
+async function refreshPiHub() {
+  const icon = document.getElementById('pi-refresh-icon');
+  if (icon) icon.classList.add('spinning');
+  try {
+    await Promise.all([loadPiStats(), loadPiServices(), loadPCStatus()]);
+  } finally {
+    if (icon) icon.classList.remove('spinning');
+  }
+}
+
+async function loadPiStats() {
+  try {
+    const res = await fetch('/api/pi/stats');
+    if (!res.ok) throw new Error('Pi API connection failed');
+    const data = await res.json();
+    state.piData = data;
+
+    const badge = document.getElementById('pi-status-badge');
+    const heroStat = document.getElementById('hero-pi-stat');
+    const hostLabel = document.getElementById('pi-hostname-label');
+    const ipLabel = document.getElementById('pi-ip-label');
+    const tempText = document.getElementById('pi-temp-text');
+    const tempStat = document.getElementById('pi-temp-stat');
+    const tempProgress = document.getElementById('pi-temp-progress');
+
+    if (data.online) {
+      if (badge) {
+        badge.textContent = 'Online';
+        badge.className = 'badge-status badge-status-online';
+      }
+      if (heroStat) {
+        heroStat.textContent = `${data.temperature_c ? data.temperature_c + '°C' : 'Online'}`;
+        heroStat.style.color = '#38bdf8';
+      }
+      if (hostLabel) hostLabel.textContent = data.hostname || 'raspberrypi';
+      if (ipLabel) ipLabel.textContent = data.ip || '10.0.0.120';
+
+      // Temperature
+      const temp = data.temperature_c !== null ? data.temperature_c : '--';
+      if (tempText) tempText.textContent = `${temp}°C`;
+      if (tempStat) tempStat.textContent = `${temp}°C`;
+      if (tempProgress && data.temperature_c !== null) {
+        const pct = Math.min(Math.max((data.temperature_c / 85) * 100, 5), 100);
+        tempProgress.style.width = `${pct}%`;
+        tempProgress.className = `telemetry-bar ${data.temperature_c > 75 ? 'bar-rose' : data.temperature_c > 65 ? 'bar-amber' : 'bar-emerald'}`;
+      }
+
+      // CPU
+      if (data.cpu) {
+        const cpuPct = data.cpu.percent !== undefined ? data.cpu.percent : 0;
+        const cpuVal = document.getElementById('pi-cpu-val');
+        const cpuBar = document.getElementById('pi-cpu-progress');
+        const cpuCores = document.getElementById('pi-cpu-cores-val');
+        const cpuLoad = document.getElementById('pi-cpu-load-val');
+
+        if (cpuVal) cpuVal.textContent = `${cpuPct}%`;
+        if (cpuBar) cpuBar.style.width = `${cpuPct}%`;
+        if (cpuCores) cpuCores.textContent = `${data.cpu.cores || 4} Cores`;
+        if (cpuLoad && data.cpu.load) {
+          cpuLoad.textContent = `Load: ${data.cpu.load.join(', ')}`;
+        }
+      }
+
+      // RAM
+      if (data.memory) {
+        const ramPct = data.memory.percent || 0;
+        const ramVal = document.getElementById('pi-ram-val');
+        const ramBar = document.getElementById('pi-ram-progress');
+        const ramUsed = document.getElementById('pi-ram-used-val');
+        const ramFree = document.getElementById('pi-ram-free-val');
+
+        if (ramVal) ramVal.textContent = `${ramPct}%`;
+        if (ramBar) ramBar.style.width = `${ramPct}%`;
+        if (ramUsed) ramUsed.textContent = `${data.memory.used_gb} / ${data.memory.total_gb} GB`;
+        if (ramFree) ramFree.textContent = `Free: ${data.memory.free_gb} GB`;
+      }
+
+      // NVMe Disk
+      if (data.disk) {
+        const diskPct = data.disk.percent || 0;
+        const diskVal = document.getElementById('pi-disk-val');
+        const diskBar = document.getElementById('pi-disk-progress');
+        const diskUsed = document.getElementById('pi-disk-used-val');
+        const diskFree = document.getElementById('pi-disk-free-val');
+
+        if (diskVal) diskVal.textContent = `${diskPct}%`;
+        if (diskBar) diskBar.style.width = `${diskPct}%`;
+        if (diskUsed) diskUsed.textContent = `${data.disk.used_gb} / ${data.disk.total_gb} GB`;
+        if (diskFree) diskFree.textContent = `Free: ${data.disk.free_gb} GB`;
+      }
+
+      // Uptime
+      if (data.uptime_seconds !== undefined) {
+        const upSec = data.uptime_seconds;
+        const d = Math.floor(upSec / 86400);
+        const h = Math.floor((upSec % 86400) / 3600);
+        const m = Math.floor((upSec % 3600) / 60);
+        const uptimeStr = d > 0 ? `${d}d ${h}h ${m}m` : `${h}h ${m}m`;
+        const uptimeEl = document.getElementById('pi-uptime-val');
+        if (uptimeEl) uptimeEl.textContent = `Uptime: ${uptimeStr}`;
+      }
+
+    } else {
+      if (badge) {
+        badge.textContent = 'Offline';
+        badge.className = 'badge-status badge-status-offline';
+      }
+      if (heroStat) {
+        heroStat.textContent = 'Offline';
+        heroStat.style.color = '#f43f5e';
+      }
+    }
+  } catch (err) {
+    const badge = document.getElementById('pi-status-badge');
+    const heroStat = document.getElementById('hero-pi-stat');
+    if (badge) {
+      badge.textContent = 'Unreachable';
+      badge.className = 'badge-status badge-status-offline';
+    }
+    if (heroStat) {
+      heroStat.textContent = 'Offline';
+      heroStat.style.color = '#f43f5e';
+    }
+  }
+}
+
+async function loadPiServices() {
+  const tbody = document.getElementById('pi-services-body');
+  if (!tbody) return;
+
+  try {
+    const res = await fetch('/api/pi/services');
+    if (!res.ok) throw new Error('Failed to load services');
+    const data = await res.json();
+    const services = data.services || [];
+    state.services = services;
+
+    if (services.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="4" class="text-center py-4 text-muted">No monitored services reported or Pi is offline.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = services.map(svc => `
+      <tr>
+        <td class="font-mono text-cyan font-semibold">${escapeHtml(svc.service)}</td>
+        <td class="text-slate-300">${escapeHtml(svc.display || svc.service)}</td>
+        <td>
+          <span class="badge-status ${svc.active ? 'badge-status-online' : 'badge-status-offline'}">
+            ${svc.active ? 'Active' : 'Inactive'}
+          </span>
+        </td>
+        <td class="text-right">
+          <div class="service-action-btns">
+            <button class="btn-service btn-service-restart" onclick="controlPiService('${escapeHtml(svc.service)}', 'restart')" title="Restart service">
+              <svg viewBox="0 0 24 24"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+              <span>Restart</span>
+            </button>
+            ${svc.active ? `
+              <button class="btn-service btn-service-stop" onclick="controlPiService('${escapeHtml(svc.service)}', 'stop')" title="Stop service">
+                <span>Stop</span>
+              </button>
+            ` : `
+              <button class="btn-service btn-service-start" onclick="controlPiService('${escapeHtml(svc.service)}', 'start')" title="Start service">
+                <span>Start</span>
+              </button>
+            `}
+          </div>
+        </td>
+      </tr>
+    `).join('');
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="4" class="text-center py-4 text-muted">Could not query services: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+async function controlPiService(serviceName, action) {
+  try {
+    showToast(`Sending ${action} for '${serviceName}'...`, 'info');
+    const res = await fetch(`/api/pi/services/${encodeURIComponent(serviceName)}/${action}`, {
+      method: 'POST'
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Service action failed');
+    showToast(`Service '${serviceName}' ${action} successful!`, 'success');
+    await loadPiServices();
+  } catch (err) {
+    showToast(`Service Error: ${err.message}`, 'error');
+  }
+}
+
+async function rebootPiUI() {
+  if (!confirm("⚠️ REBOOT CONFIRMATION\n\nAre you sure you want to reboot the Raspberry Pi 5 server?\nAll background processes and active sessions on the Pi will restart.")) {
+    return;
+  }
+
+  showHardwareAlert("🔄 Raspberry Pi 5 reboot initiated. The server will be offline for ~30 seconds.", "warning");
+  showToast("Reboot Pi command dispatched!", "warning");
+
+  try {
+    const res = await fetch('/api/pi/power/reboot', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Reboot request rejected');
+    showToast(data.message || 'Pi rebooting...', 'success');
+  } catch (err) {
+    showHardwareAlert(`Reboot Error: ${err.message}`, "error");
+    showToast(`Error: ${err.message}`, 'error');
+  }
+}
+
+async function shutdownPiUI() {
+  if (!confirm("🛑 SHUTDOWN CONFIRMATION\n\nAre you sure you want to SHUT DOWN the Raspberry Pi 5?\nThe Pi will completely power off and must be physically powered back on.")) {
+    return;
+  }
+
+  showHardwareAlert("🛑 Raspberry Pi 5 shutdown initiated. Server powering down.", "error");
+  showToast("Shutdown Pi command dispatched!", "error");
+
+  try {
+    const res = await fetch('/api/pi/power/shutdown', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Shutdown request rejected');
+    showToast(data.message || 'Pi powering off...', 'info');
+  } catch (err) {
+    showHardwareAlert(`Shutdown Error: ${err.message}`, "error");
+    showToast(`Error: ${err.message}`, 'error');
+  }
+}
+
+async function loadPCStatus() {
+  try {
+    const res = await fetch('/api/pc/status');
+    if (!res.ok) throw new Error('PC check failed');
+    const data = await res.json();
+    state.pcData = data;
+
+    const badge = document.getElementById('pc-status-badge');
+    const heroStat = document.getElementById('hero-pc-stat');
+    const titleLabel = document.getElementById('pc-title-label');
+    const ipLabel = document.getElementById('pc-ip-label');
+    const macLabel = document.getElementById('pc-mac-label');
+    const pingText = document.getElementById('pc-ping-text');
+    const agentBadge = document.getElementById('pc-agent-indicator-badge');
+
+    if (titleLabel && data.pc_name) titleLabel.textContent = data.pc_name;
+    if (ipLabel && data.ip) ipLabel.textContent = data.ip;
+    if (macLabel && data.mac) macLabel.textContent = data.mac;
+
+    if (data.online) {
+      if (badge) {
+        badge.textContent = 'Online';
+        badge.className = 'badge-status badge-status-online';
+      }
+      if (heroStat) {
+        heroStat.textContent = data.ping_ms ? `${data.ping_ms} ms` : 'Online';
+        heroStat.style.color = '#10b981';
+      }
+      if (pingText) {
+        pingText.textContent = data.ping_ms !== null ? `${data.ping_ms} ms` : 'Local';
+      }
+    } else {
+      if (badge) {
+        badge.textContent = 'Asleep / Offline';
+        badge.className = 'badge-status badge-status-offline';
+      }
+      if (heroStat) {
+        heroStat.textContent = 'Standby';
+        heroStat.style.color = '#94a3b8';
+      }
+      if (pingText) pingText.textContent = 'Unreachable';
+    }
+
+    // Companion agent status
+    if (agentBadge) {
+      if (data.agent_online) {
+        agentBadge.textContent = 'Companion Agent: Active (8888)';
+        agentBadge.className = 'agent-badge agent-online';
+      } else if (data.is_local) {
+        agentBadge.textContent = 'Local Direct Control: Active';
+        agentBadge.className = 'agent-badge agent-online';
+      } else {
+        agentBadge.textContent = 'Companion Agent: Offline';
+        agentBadge.className = 'agent-badge agent-offline';
+      }
+    }
+
+  } catch (err) {
+    const badge = document.getElementById('pc-status-badge');
+    const heroStat = document.getElementById('hero-pc-stat');
+    if (badge) {
+      badge.textContent = 'Offline';
+      badge.className = 'badge-status badge-status-offline';
+    }
+    if (heroStat) {
+      heroStat.textContent = 'Offline';
+      heroStat.style.color = '#94a3b8';
+    }
+  }
+}
+
+async function wakePCUI() {
+  showToast('Sending Wake-on-LAN magic packet to PC...', 'info');
+  try {
+    const res = await fetch('/api/pc/wake', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'WoL dispatch failed');
+    showToast(data.message || 'Wake-on-LAN packet sent!', 'success');
+    showHardwareAlert(`⚡ Wake-on-LAN packet transmitted to PC MAC (${state.pcData?.mac || '84:9e:56:51:4b:cd'}). NIC powering up.`, 'success');
+    setTimeout(loadPCStatus, 3000);
+  } catch (err) {
+    showToast(`WoL Error: ${err.message}`, 'error');
+  }
+}
+
+async function triggerPCActionUI(action) {
+  let promptMsg = "";
+  if (action === 'restart' || action === 'reboot') {
+    promptMsg = "⚠️ REBOOT WINDOWS PC\n\nAre you sure you want to reboot the PC?\nA 10-second timer will start with a cancel button.";
+  } else if (action === 'shutdown') {
+    promptMsg = "🛑 SHUTDOWN WINDOWS PC\n\nAre you sure you want to shut down the PC?\nA 10-second timer will start with a cancel button.";
+  } else if (action === 'lock') {
+    promptMsg = "🔒 LOCK WORKSTATION\n\nLock the Windows screen immediately?";
+  } else if (action === 'sleep') {
+    promptMsg = "🌙 SLEEP PC\n\nPut Windows PC into sleep / standby mode?";
+  }
+
+  if (promptMsg && !confirm(promptMsg)) {
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/pc/action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || data.error || 'Action failed');
+
+    showToast(data.message || `PC action '${action}' dispatched.`, 'success');
+
+    // Show abort button if restart or shutdown
+    const abortBtn = document.getElementById('btn-action-abort-pc');
+    if (action === 'restart' || action === 'reboot' || action === 'shutdown') {
+      if (abortBtn) abortBtn.style.display = 'flex';
+      startPCRebootCountdown(10, action);
+    }
+  } catch (err) {
+    showToast(`PC Action Error: ${err.message}`, 'error');
+    showHardwareAlert(`PC Error: ${err.message}`, 'error');
+  }
+}
+
+function startPCRebootCountdown(seconds, actionName) {
+  clearInterval(state.pcRebootInterval);
+  state.pcRebootCountdown = seconds;
+
+  showHardwareAlert(
+    `⏳ PC ${actionName.toUpperCase()} scheduled in ${seconds}s. Click [Abort Reboot] immediately if you need to cancel!`,
+    'warning'
+  );
+
+  state.pcRebootInterval = setInterval(() => {
+    state.pcRebootCountdown--;
+    if (state.pcRebootCountdown > 0) {
+      showHardwareAlert(
+        `⏳ PC ${actionName.toUpperCase()} in ${state.pcRebootCountdown}s. Click [Abort Reboot] to cancel!`,
+        'warning'
+      );
+    } else {
+      clearInterval(state.pcRebootInterval);
+      showHardwareAlert(`🚀 PC ${actionName} command executed. Machine restarting.`, 'info');
+      const abortBtn = document.getElementById('btn-action-abort-pc');
+      if (abortBtn) abortBtn.style.display = 'none';
+    }
+  }, 1000);
+}
+
+async function abortPCActionUI() {
+  clearInterval(state.pcRebootInterval);
+  try {
+    const res = await fetch('/api/pc/action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'abort' })
+    });
+    const data = await res.json();
+    showToast(data.message || 'PC restart aborted!', 'info');
+    showHardwareAlert("✅ PC shutdown/restart cancelled successfully.", "success");
+
+    const abortBtn = document.getElementById('btn-action-abort-pc');
+    if (abortBtn) abortBtn.style.display = 'none';
+  } catch (err) {
+    showToast(`Abort Error: ${err.message}`, 'error');
+  }
+}
+
+function showHardwareAlert(message, type = 'info') {
+  const box = document.getElementById('pi-pc-alert-banner');
+  if (!box) return;
+  box.style.display = 'block';
+  box.className = `hardware-alert-box alert-${type}`;
+  box.innerHTML = `<span>${escapeHtml(message)}</span><button class="alert-close-btn" onclick="this.parentElement.style.display='none'">&times;</button>`;
+}
+
+async function handlePiCommand(e) {
+  e.preventDefault();
+  const input = document.getElementById('pi-cmd-input');
+  const output = document.getElementById('pi-cmd-output');
+  const btn = document.getElementById('btn-pi-cmd-submit');
+  const cmd = input.value.trim();
+  if (!cmd) return;
+
+  btn.disabled = true;
+  output.style.display = 'block';
+  output.textContent = `$ ${cmd}\nRunning...`;
+
+  try {
+    const res = await fetch('/api/pi/exec', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: cmd })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || data.error || 'Command failed');
+
+    const stdout = data.stdout || '';
+    const stderr = data.stderr || '';
+    const exitCode = data.exit_code !== undefined ? data.exit_code : 0;
+    output.textContent = `$ ${cmd}\n${stdout}${stderr}\n[Process exited with code ${exitCode}]`;
+  } catch (err) {
+    output.textContent = `$ ${cmd}\nError: ${err.message}`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function handlePCCommand(e) {
+  e.preventDefault();
+  const input = document.getElementById('pc-cmd-input');
+  const output = document.getElementById('pc-cmd-output');
+  const btn = document.getElementById('btn-pc-cmd-submit');
+  const cmd = input.value.trim();
+  if (!cmd) return;
+
+  btn.disabled = true;
+  output.style.display = 'block';
+  output.textContent = `PS > ${cmd}\nSending to PC...`;
+
+  try {
+    const res = await fetch('/api/pc/action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'exec', command: cmd })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || data.error || 'Command failed');
+
+    const stdout = data.stdout || data.message || '';
+    const stderr = data.stderr || '';
+    const exitCode = data.exit_code !== undefined ? `\n[Exit Code: ${data.exit_code}]` : '';
+    output.textContent = `PS > ${cmd}\n${stdout}${stderr}${exitCode}`;
+  } catch (err) {
+    output.textContent = `PS > ${cmd}\nError: ${err.message}`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+

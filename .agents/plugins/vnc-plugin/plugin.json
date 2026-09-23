@@ -1,0 +1,16 @@
+{
+  "name": "vnc-plugin",
+  "version": "1.0.0",
+  "description": "VNC Remote Screen Streaming & Antigravity Agent Command Bridge",
+  "author": {
+    "name": "Overwatch Team"
+  },
+  "license": "MIT",
+  "keywords": [
+    "vnc",
+    "remote-desktop",
+    "rfb",
+    "agent-bridge",
+    "screen-stream"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "vnc-bridge": {
+      "command": "py",
+      "args": [
+        "C:\\Users\\Brendhann\\.gemini\\config\\plugins\\vnc-plugin\\mcp_server.py"
+      ]
+    }
+  }
+}
